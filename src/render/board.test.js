@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { PANEL_HEIGHT, PANEL_WIDTH, buildBoardSvg, directionLabel } from './board.js';
+import {
+	FOOTER_RULE_Y,
+	PANEL_HEIGHT,
+	PANEL_WIDTH,
+	buildBoardSvg,
+	directionLabel,
+	rowMetrics,
+} from './board.js';
 import { BUS_BOARD, RAIL_BOARD } from '../dev/sample-boards.js';
 
 describe( 'directionLabel', () => {
@@ -32,7 +39,55 @@ describe( 'directionLabel', () => {
 	} );
 } );
 
+/** A sparse board, for the cases where the ceiling binds instead of the fit. */
+const SPARSE_BOARD = {
+	...BUS_BOARD,
+	groups: [ { ...BUS_BOARD.groups[ 0 ], rows: BUS_BOARD.groups[ 0 ].rows.slice( 0, 2 ) } ],
+};
+
+describe( 'rowMetrics', () => {
+	it( 'scales the accepted board down to fit, since eight rows do not go at full height', () => {
+		// 1028 of usable height over eight rows, floored.
+		expect( rowMetrics( BUS_BOARD.groups ).height ).toBe( 128 );
+	} );
+
+	it( 'caps a sparse board at the ceiling rather than stretching it across the panel', () => {
+		expect( rowMetrics( SPARSE_BOARD.groups ).height ).toBe( 158 );
+	} );
+
+	// The failure this guards against is silent: nothing clips, the rows simply draw over the footer
+	// rule and off the bottom of the panel.
+	it.each( [
+		[ 'the bus board', BUS_BOARD ],
+		[ 'the rail board', RAIL_BOARD ],
+		[ 'a sparse board', SPARSE_BOARD ],
+	] )( 'keeps the last row clear of the footer rule on %s', ( _label, board ) => {
+		// Strictly below, not merely touching. Landing exactly on the rule satisfies "it fits" while
+		// leaving descenders a pixel or two from crossing it.
+		expect( rowMetrics( board.groups ).bottom ).toBeLessThan( FOOTER_RULE_Y );
+	} );
+
+	it( 'does not divide by a row count of zero', () => {
+		expect( rowMetrics( [] ).height ).toBe( 158 );
+	} );
+} );
+
 describe( 'buildBoardSvg', () => {
+	it( 'scales the whole row together, so a denser board is the same layout seen smaller', () => {
+		const dense = buildBoardSvg( BUS_BOARD );
+
+		expect( dense ).toContain( 'y1="288"' );
+		expect( buildBoardSvg( SPARSE_BOARD ) ).toContain( 'y1="318"' );
+
+		// Every size inside the row comes down by the same factor rather than being retuned.
+		expect( dense ).toContain( 'font-size="62"' );
+		expect( buildBoardSvg( SPARSE_BOARD ) ).toContain( 'font-size="76"' );
+	} );
+
+	it( 'credits nothing in the footer, which is now just the stamp and the stop', () => {
+		expect( buildBoardSvg( BUS_BOARD ) ).not.toContain( '<svg x=' );
+	} );
+
 	it( 'renders at native panel resolution', () => {
 		const svg = buildBoardSvg( BUS_BOARD );
 
@@ -61,7 +116,7 @@ describe( 'buildBoardSvg', () => {
 	} );
 
 	it( 'always carries the as-of stamp, which is the only staleness defence', () => {
-		expect( buildBoardSvg( BUS_BOARD ) ).toContain( 'as of 4:22 pm' );
+		expect( buildBoardSvg( BUS_BOARD ) ).toContain( 'Updated at 4:22 pm' );
 	} );
 
 	it( 'shows the day and date, so a panel frozen since yesterday is obvious', () => {

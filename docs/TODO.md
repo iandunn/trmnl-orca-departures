@@ -18,7 +18,7 @@ Docs are split by audience: `README.md` is the overview and links out, `docs/how
 
 ### What the config surface already guarantees
 
-Built 2026-08-01. `readConfig()` in `src/config.js` is the only place that reads a display or scheduling value off `env`; `formatBoardTime()` in `src/clock.js` turns a timestamp into the header fields and the "as of" stamp. What the next piece needs to know:
+Built 2026-08-01. `readConfig()` in `src/config.js` is the only place that reads a display or scheduling value off `env`; `formatBoardTime()` in `src/clock.js` turns a timestamp into the header fields and the "Updated at" stamp. What the next piece needs to know:
 
 - Everything coerces and falls back rather than throwing, deliberately: the same var arrives as a **number** from `[vars]` and as a **string** from `.dev.vars` or a secret, and `/api/display` must never fail over a config value. Refresh rates below 1 second are refused, since 0 hot-loops the device flat.
 - `activeStartMinutes`/`activeEndMinutes` are exposed but **unconsumed** — the scheduler is their first reader. `HEADER_TEXT` was deleted 2026-08-01 rather than wired up: both modes draw a logo rather than a word, so it was config for a case that never arises, and a different agency needs its own logo asset that no string could supply.
@@ -26,7 +26,7 @@ Built 2026-08-01. `readConfig()` in `src/config.js` is the only place that reads
 - **`formatBoardTime()` throws on a non-finite timestamp, on purpose, and nothing catches it yet.** This is the one place the never-fail rule and a deliberate throw collide: `/api/display` must catch it and fall back to the render-failed screen rather than let a missing OneBusAway `currentTime` take down the endpoint. Silently formatting a bad timestamp would stamp the board 1969, which is worse.
 - The preview renders at a fixed reference instant by default so the header stays consistent with the fixture rows; `?now=live` renders at the real clock.
 - Verified against ICU rather than assumed: legacy zone aliases (`US/Pacific`, `PST`) resolve to the full zone and stay DST-aware, so the timezone guard only has to catch what actually throws. Separately, ICU separates the day period with U+202F, which Fira Sans need not carry — every string is assembled from `formatToParts()` with ASCII spaces for that reason.
-- **Row count is deliberately not configuration** — it follows from the layout constants in `render/board.js`, not from a deployment. Neither is the staleness threshold, which was withdrawn as a requirement when the as-of stamp became the mechanism.
+- **Row count is deliberately not configuration** — it follows from how many departures the data has, bounded by what fits. `rowMetrics()` in `render/board.js` derives row height from the count rather than the other way round, so no deployment sets it. Neither is the staleness threshold, which was withdrawn as a requirement when the "Updated at" stamp became the mechanism.
 
 ### What the request gate and stats page already guarantee
 
@@ -59,9 +59,9 @@ The `/api/log` payload is richer than the name suggests, so log every field rath
 
 The other half of the same window is free and easy to miss: the request headers already on every `/api/display` poll — `Battery-Voltage`, `FW-Version`, `Wake-Time`, `Update-Source`, `Width`/`Height`, plus the X's six extra battery headers. Those arrive whether or not the device ever logs, so log them too. The headers answer "did it wake, and what did it think it was doing"; `/api/log` answers "where did it fail". One caveat: `Image-Cached` reports the **previous** wake's outcome, so it is always a cycle stale.
 
-**2. Live OneBusAway data.** One fetch per stop; `references.routes` and `references.stops` ride along so no second call is needed. Dedup by `tripId`, drop anything already past, use `predictedArrivalTime` and fall back to `scheduledArrivalTime` with `live: false`. Map `route.type` to board mode — **0 is rail, 3 is bus; never match on the route name**, since RapidRide's `H Line` is a bus and would be drawn as rail. Take the "as of" timestamp from OBA's `currentTime`, not our own clock.
+**2. Live OneBusAway data.** One fetch per stop; `references.routes` and `references.stops` ride along so no second call is needed. Dedup by `tripId`, drop anything already past, use `predictedArrivalTime` and fall back to `scheduledArrivalTime` with `live: false`. Map `route.type` to board mode — **0 is rail, 3 is bus; never match on the route name**, since RapidRide's `H Line` is a bus and would be drawn as rail. Take the "Updated at" timestamp from OBA's `currentTime`, not our own clock.
 
-Still open and genuinely undecided: where the recovery generation is stored, and how the "as of" stamp is sized (cannot be judged until the device arrives).
+Still open and genuinely undecided: where the recovery generation is stored, and how the "Updated at" stamp is sized (cannot be judged until the device arrives).
 
 ## Quick Wins
 
@@ -71,14 +71,13 @@ Try to do as many of these as possible. Don't do one if it'd overlap code with a
 	maybe use the icon+link from https://storage.ghost.io/c/19/31/1931222a-d1c5-42ac-8932-2ee3ac1f8927/content/images/old-theurbanist-org/wp-content/uploads/2019/11/new-totems.png
 	or use the logo from https://www.soundtransit.org/get-to-know-us/our-brand/logos
 
-- [ ] regenerate `assets/bus.png` and `assets/light-rail.png` from `/_preview` whenever the design changes, or the README's alt text starts lying. The bus one already went stale once when the direction labels changed.
-
 
 ## Want to do now
 
 - [ ] pick the best bus routes to demo
-	for nbound variant i want h to downtown seattle, 13 to seattle center, d to ballard uptown - not at same stops though
-	sbound i want 125 to south seattle college, 7 to rainer beach, and ? to ? - right stops though?
+	for nbound variant i want 13 to seattle center, d to ballard uptown
+	sbound i h to westwood village, 7 to rainer beach. want 125 to south seattle college and 50 would be nice but optional.
+	find me stops that meet those criteria or close. give me options if there are many
 	maybe stops 420 and 600 instead of 3rd/pine
 
 	**Session `36225e1a-cd8c-4ed8-81d0-32aace01555d` has the data already** — full Monday schedules with headsigns and trip counts for `1_590`, `1_430`, `1_600`, `1_420`, `40_621`, `40_623`, `40_1108`, `40_1121`. Resume it instead of re-querying; the `TEST` key is heavily rate-limited.
@@ -142,7 +141,7 @@ Try to do as many of these as possible. Don't do one if it'd overlap code with a
 
 - [ ] **Store the recovery generation.** The only genuinely stateful piece left. Written on error-state transitions only, so quota is not the constraint — the open question is the **read** path, since `/api/display` reads it ~1440x/day and must never fail. Decide the failure behaviour explicitly: on a read error, proceed with generation 0 and serve a valid response rather than failing the endpoint.
 
-- [ ] **Size the "as of" stamp properly — it is the single load-bearing staleness defense.** "At a glance" is the entire condition the accepted risk rests on, so it must be readable from wherever the departures are. Variant 8 puts it bottom-left beside the OneBusAway mark at 46px bold, which is better than a footer caption but still unproven at physical size. The stacked day/date in the header is the second half of this — it catches a panel frozen since yesterday, which a bare `h:mm` cannot.
+- [ ] **Size the "Updated at" stamp properly — it is the single load-bearing staleness defense.** "At a glance" is the entire condition the accepted risk rests on, so it must be readable from wherever the departures are. It currently sits bottom-left at 38px regular, starting at the left margin now that the OneBusAway mark is gone — better than a footer caption, still unproven at physical size, and the removal of the logo freed the width to grow it. Going to four rows helped the ratio without touching the stamp: the countdown numeral came down from 76px to 62px while the stamp held at 38. The stacked day/date in the header is the second half of this — it catches a panel frozen since yesterday, which a bare `h:mm` cannot.
 
 - [ ] **Match the sign's typeface more closely.** Fira Sans is chosen and applied — it is the only tested open face with the **open-top `4`** the real sign uses, and the reasoning is written up in `CLAUDE.md`. What remains is that the real face is still unidentified: it is a Connectpoint choice, absent from Metro's brand standards, and pinning it down needs the vendor spec or a font-identification service. Frutiger and Myriad are the closest matches and both are commercial.
 	**Generating a font is not the answer.** Drawing a usable typeface is not something to take on here, and modifying one open glyph to notch the `4` gets a single character closer while leaving every other letterform unchanged, which is the wrong end of the effort curve.
@@ -182,7 +181,8 @@ Try to do as many of these as possible. Don't do one if it'd overlap code with a
 	**Do not simply delete it.** The firmware research there is deeper than the `CLAUDE.md` summary, and the `blueset/trmnl-recipes` prior-art analysis exists nowhere else.
 	Suggested: rename to something like `docs/decision-history.md`, replace the opening with a header pointing at `CLAUDE.md`, and optionally drop the fully-withdrawn hosting options and Addendum 01. It has been patched with strikethroughs about eight times; that is the wrong shape for a doc that is really a record.
 
-- [ ] **Remove dead exports in `src/`.** Four exported symbols with no consumer:
+- [ ] **Remove dead exports in `src/`.** Five exported symbols with no consumer — but one of them is parked on purpose, so read before deleting:
+	- `obaMark()` in `render/board.js`, plus the `OBA_VEHICLES_*` assets it needs. **Keep this one.** The footer stopped drawing the OneBusAway mark on 2026-08-01 and it is exported only so it stays reachable; putting it back is a one-line change and re-deriving the two-step recolour is not.
 	- `tramGlyph()` in `render/board.js`, plus `OBA_TRAM_VIEWBOX` and `OBA_TRAM_RATIO` in `assets/oba-mark.js` — the light-rail icon from the rejected variant 11/12 badge designs. Only useful if bus and rail ever share one board, which they never will, since the modes have separate platforms. **Clearest deletion candidate.**
 	- `GREY` and `FAINT` in `render/board.js` — exported for no reason; both are only used inside that module.
 	- `rasterize()` and `pngResponse()` in `render/index.js` — written speculatively for the BYOS work. `pngResponse()` earns its keep once `/api/display` lands, because it is where the exact `image/png` Content-Type rule gets enforced in one place; dead until then.
@@ -201,7 +201,7 @@ Try to do as many of these as possible. Don't do one if it'd overlap code with a
 	**Plain truncation is not enough.** `Rainier Beach Via Rai…` is worse than useless. Wants a real rule — strip a trailing `Via …` clause, collapse a repeated leading token — with truncation only as the backstop. Consider measuring rendered width rather than counting characters, since the badge column is fixed and the time column is right-aligned.
 
 - [ ] **Route filtering.** Explicitly **not needed** for the initial build — recorded so the reasoning is not relost. The chosen stop serves few enough routes that everything fits.
-	It would matter at a busy stop: 3rd Ave & Virginia St serves 21 routes per direction, and trip counts range from 1 a day (`24`, `27`) to 141 (`E Line`). A peak-only express that runs three times a day will almost never be in the next six departures anyway, so sorting by time already filters most of the noise — an explicit allow/deny list is only worth it if a frequent route you never ride keeps crowding out one you do.
+	It would matter at a busy stop: 3rd Ave & Virginia St serves 21 routes per direction, and trip counts range from 1 a day (`24`, `27`) to 141 (`E Line`). A peak-only express that runs three times a day will almost never be in the next eight departures anyway, so sorting by time already filters most of the noise — an explicit allow/deny list is only worth it if a frequent route you never ride keeps crowding out one you do.
 	Must be configuration if built, per the no-hardcoding rule.
 
 	**Session `36225e1a-cd8c-4ed8-81d0-32aace01555d` already holds the route data** for every stop looked up so far — full Monday schedules with per-route trip counts and headsigns for `1_590`, `1_430`, `1_600`, `1_420`, `40_621`, `40_623`, `40_1108`, `40_1121`. Resume it rather than re-querying; the `TEST` key is heavily rate-limited and each of those took several retries.

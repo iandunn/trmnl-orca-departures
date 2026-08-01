@@ -29,7 +29,7 @@ export function isPreviewEnabled( env ) {
  *
  * Defaults to the fixed reference instant rather than the real clock, because the sample rows are
  * fixtures: a live header reading "as of 4:13 am" above a departure at 4:44 pm is internally
- * inconsistent, which is exactly the kind of thing the "as of" stamp is being judged on. `?now=live`
+ * inconsistent, which is exactly the kind of thing the "Updated at" stamp is being judged on. `?now=live`
  * renders at the real clock instead, which is what exercises `Intl` in the configured timezone; an
  * epoch in milliseconds pins any other moment.
  */
@@ -104,7 +104,7 @@ export async function handlePreview( request, env ) {
 		} );
 	}
 
-	// The timezone comes from real config, so the header block and the "as of" stamp are produced by
+	// The timezone comes from real config, so the header block and the "Updated at" stamp are produced by
 	// the same path the device will get rather than by a fixture string.
 	const { timezone } = readConfig( env );
 	const boards = sampleBoards( { nowMs: requestedTime( url ), timezone } );

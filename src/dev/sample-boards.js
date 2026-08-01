@@ -47,7 +47,16 @@ export const SAMPLE_DIRECTION_OVERRIDES = {
  */
 export const REFERENCE_TIME_MS = Date.parse( '2026-08-01T16:22:00-07:00' );
 
-/** 3rd Ave & Pine St — `1_590` northwest bound, `1_430` southeast bound. Buses only. */
+/**
+ * 3rd Ave & Pine St — `1_590` northwest bound, `1_430` southeast bound. Buses only.
+ *
+ * Four departures per direction, which is the accepted density. The last row of each group is
+ * deliberately the awkward one: `131` and `570` are the widest route numbers this pair serves,
+ * `Seattle Tacoma International Airport` is the longest headsign either stop carries, and the `570`
+ * row is scheduled — so the board's tightest row also carries its tallest stack, `Scheduled`
+ * included. `570` is Sound Transit rather than Metro, which is itself real: a `1_` stop returns ST
+ * Express arrivals alongside Metro's.
+ */
 export function busBoard( time, overrides = SAMPLE_DIRECTION_OVERRIDES ) {
 	return {
 		mode: 'bus',
@@ -62,6 +71,7 @@ export function busBoard( time, overrides = SAMPLE_DIRECTION_OVERRIDES ) {
 					{ badge: 'H', to: 'Downtown Seattle Westwood Village', value: 'Now', unit: '', live: true },
 					{ badge: '40', to: 'Northgate Station Fremont', value: '4', unit: 'min', live: true },
 					{ badge: '62', to: 'Sand Point East Green Lake', value: '11', unit: 'min', live: false },
+					{ badge: '131', to: 'Downtown Seattle Highland Park', value: '16', unit: 'min', live: true },
 				],
 			},
 			{
@@ -71,6 +81,13 @@ export function busBoard( time, overrides = SAMPLE_DIRECTION_OVERRIDES ) {
 					{ badge: '7', to: 'Rainier Beach Via Rainier Ave S', value: '6', unit: 'min', live: true },
 					{ badge: '36', to: 'Othello Station N Beacon Hill', value: '4:44', unit: 'pm', live: false },
 					{ badge: '14', to: 'Mount Baker Transit Center', value: '4:52', unit: 'pm', live: true },
+					{
+						badge: '570',
+						to: 'Seattle Tacoma International Airport',
+						value: '4:58',
+						unit: 'pm',
+						live: false,
+					},
 				],
 			},
 		],
@@ -83,6 +100,9 @@ export function busBoard( time, overrides = SAMPLE_DIRECTION_OVERRIDES ) {
  * Deliberately the interchange rather than Westlake: northbound **both lines show the same
  * destination**, so the line number is the only thing separating those rows. If the circle badge
  * cannot carry that, nothing else in the row will. Southbound is where the lines actually diverge.
+ *
+ * The lines alternate, which is what the real service does and what makes the fourth row worth
+ * having here — it puts two indistinguishable northbound destinations directly above another two.
  */
 export function railBoard( time, overrides = SAMPLE_DIRECTION_OVERRIDES ) {
 	return {
@@ -98,6 +118,7 @@ export function railBoard( time, overrides = SAMPLE_DIRECTION_OVERRIDES ) {
 					{ badge: '1', to: 'Lynnwood City Center', value: '3', unit: 'min', live: true },
 					{ badge: '2', to: 'Lynnwood City Center', value: '7', unit: 'min', live: true },
 					{ badge: '1', to: 'Lynnwood City Center', value: '12', unit: 'min', live: false },
+					{ badge: '2', to: 'Lynnwood City Center', value: '16', unit: 'min', live: false },
 				],
 			},
 			{
@@ -107,6 +128,7 @@ export function railBoard( time, overrides = SAMPLE_DIRECTION_OVERRIDES ) {
 					{ badge: '1', to: 'Federal Way Downtown', value: '5', unit: 'min', live: true },
 					{ badge: '2', to: 'Downtown Redmond', value: '9', unit: 'min', live: true },
 					{ badge: '1', to: 'Federal Way Downtown', value: '4:52', unit: 'pm', live: false },
+					{ badge: '2', to: 'Downtown Redmond', value: '4:59', unit: 'pm', live: false },
 				],
 			},
 		],
@@ -121,7 +143,7 @@ export const RAIL_BOARD = railBoard( formatBoardTime( REFERENCE_TIME_MS, CONFIG_
  * The contact sheet's boards, rendered at whatever moment and timezone the caller supplies.
  *
  * The preview passes the real clock and the configured timezone, which is the only way to see the
- * header block and the "as of" stamp as the device will actually get them.
+ * header block and the "Updated at" stamp as the device will actually get them.
  *
  * @param {object} [options]
  * @param {number} [options.nowMs]    Epoch milliseconds.

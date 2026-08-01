@@ -4,7 +4,7 @@
  * `Intl.DateTimeFormat` with a `timeZone` works under workerd, so this needs no tz library and no
  * bundled tz data. Pure: it takes a timestamp and never reads a clock. That is not tidiness —
  *
- * - the "as of" stamp must come from OneBusAway's own `currentTime`, not our render time. If OBA
+ * - the "Updated at" stamp must come from OneBusAway's own `currentTime`, not our render time. If OBA
  *   serves cached predictions, stamping them with our clock claims they are fresher than they are,
  *   which is the exact lie the stamp exists to prevent.
  * - the Worker's clock is frozen for the duration of synchronous execution anyway, so there is no
@@ -31,7 +31,7 @@ function partsOf( timestampMs, timezone, options ) {
 }
 
 /**
- * The four header fields plus the "as of" stamp.
+ * The four header fields plus the "Updated at" stamp.
  *
  * The date carries **no comma** after the weekday, matching Metro's own sign, and the weekday and
  * date are stacked separately in the header rather than being one string — together they are what

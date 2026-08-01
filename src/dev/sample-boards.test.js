@@ -35,6 +35,15 @@ describe( 'sample boards', () => {
 		] );
 	} );
 
+	// Four per direction is the accepted density, and both sample boards have to carry it or the
+	// preview stops showing what the device will actually render.
+	it.each( [
+		[ 'bus', BUS_BOARD ],
+		[ 'rail', RAIL_BOARD ],
+	] )( 'gives the %s board four departures in each direction', ( _label, board ) => {
+		expect( board.groups.map( ( group ) => group.rows.length ) ).toEqual( [ 4, 4 ] );
+	} );
+
 	it( 'takes its header fields from the timestamp rather than literals', () => {
 		expect( BUS_BOARD ).toMatchObject( {
 			weekday: 'Saturday',

@@ -17,7 +17,7 @@ BYOS was chosen because the hosted path cannot express the things this sign depe
 
 The image is a content hash away from freezing: the device caches by the `filename` field and skips the repaint entirely when it is unchanged. That is a feature — an unchanged render costs zero flicker — but it means an error screen must carry a filename distinct from the last good render, or it will never be shown.
 
-Because e-paper holds its last image indefinitely with no power and no server, every render carries a visible "as of" timestamp. A sign that cannot reach the server keeps showing yesterday's departures otherwise, and no amount of server-side code can fix that from the other side of an outage.
+Because e-paper holds its last image indefinitely with no power and no server, every render carries a visible "Updated at" timestamp. A sign that cannot reach the server keeps showing yesterday's departures otherwise, and no amount of server-side code can fix that from the other side of an outage.
 
 ## Getting in, and staying out
 
@@ -31,4 +31,4 @@ Past the token check the posture inverts: a caller holding the secret is the own
 
 An e-paper sign fails quietly. It holds its last image with no power and no network, so "working" and "frozen three days ago" look the same from across the room.
 
-Two things address that, and they are different in kind. The **"as of" timestamp** is rendered into the image, so it survives the server being unreachable — it is the only defense that works when the thing that failed is the server itself. The **`/stats` page** covers everything the server *can* see: whether the panel is actually repainting, how the battery is holding up, whether a stop is misconfigured, and whether anyone other than the owner has been using the URL. See [deploying.md](deploying.md#monitoring-the-sign).
+Two things address that, and they are different in kind. The **"Updated at" timestamp** is rendered into the image, so it survives the server being unreachable — it is the only defense that works when the thing that failed is the server itself. The **`/stats` page** covers everything the server *can* see: whether the panel is actually repainting, how the battery is holding up, whether a stop is misconfigured, and whether anyone other than the owner has been using the URL. See [deploying.md](deploying.md#monitoring-the-sign).

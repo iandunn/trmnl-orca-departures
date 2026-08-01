@@ -36,11 +36,11 @@ Every 8th render additionally gets the slow deep clear rather than the fast one 
 - `src/render/png.js` — quantise and 4-bit greyscale PNG encoder. Pure.
 - `src/render/board.js` — the board as SVG, data-driven, plus `directionLabel()`. Pure.
 - `src/render/index.js` — resvg wiring; the only module that touches wasm or fonts.
-- `src/assets/` — the Metro logo as a data URI and the OneBusAway mark pre-cleaned and pre-recoloured, both generated at author time so nothing is reprocessed per render.
-- `src/dev/sample-boards.js` — the two reference boards, from real OneBusAway data. Rendered at a fixed reference instant; `?now=live` on a preview URL uses the real clock.
+- `src/assets/` — the Metro logo as a data URI and the OneBusAway mark pre-cleaned and pre-recoloured, both generated at author time so nothing is reprocessed per render. The OBA mark is **kept but no longer drawn**; see the asset notes in the layout section.
+- `src/dev/sample-boards.js` — the two reference boards, from real OneBusAway data, four departures per direction. Rendered at a fixed reference instant; `?now=live` on a preview URL uses the real clock.
 - `src/dev/preview.js` — the local contact sheet. **Gated on `DEV_PREVIEW`, which lives in `.dev.vars` and is therefore never deployed.**
 - `src/config.js` — `readConfig()`, the only reader of `env` for a display or scheduling value. Coerces and range-checks everything and never throws; secrets stay off it on purpose. Added 2026-08-01.
-- `src/clock.js` — `formatBoardTime( timestampMs, timezone )`, the header fields and the "as of" stamp. Pure, and takes the timestamp rather than reading a clock, because the stamp must come from OneBusAway's `currentTime`. Added 2026-08-01.
+- `src/clock.js` — `formatBoardTime( timestampMs, timezone )`, the header fields and the "Updated at" stamp. Pure, and takes the timestamp rather than reading a clock, because the stamp must come from OneBusAway's `currentTime`. Added 2026-08-01.
 - `src/filename.js`, `src/routing.js` — the cache key and path parsing, as before.
 - `src/gate.js` — the shell every request passes through. Returns either a finished `Response` or an authorized classification for a caller to dispatch on, which is the seam the BYOS handlers hang off. Added 2026-08-01.
 - `src/abuse.js` — `classifyRequest()`, `diagnosePath()`, the tarpit, and the `OUTCOMES` / `REJECTION_REASONS` vocabularies. Added 2026-08-01.
@@ -268,7 +268,7 @@ Images hosted on a **different** host than the API get no `ID` and no `Access-To
 
 So the primary mechanism lives inside the rendered image:
 
-1. **Every render carries a visible "as of h:mm" timestamp.** This is the whole defense against the unfixable case, and it needs no infrastructure. Real transit signs do this.
+1. **Every render carries a visible "Updated at h:mm" timestamp.** This is the whole defense against the unfixable case, and it needs no infrastructure. Real transit signs do this.
 2. **Prefer absolute clock times over countdowns.** "4 min" becomes a lie within minutes; "4:26 pm" is still correctly labeled an hour later.
 3. **Refuse to render countdowns on old data** — drop to clock times past a small age threshold.
 
@@ -283,7 +283,7 @@ Most of the confusion here comes from conflating two different ages:
 1. **How old is the data?** When OneBusAway generated these predictions. The server knows this exactly.
 2. **How old is the glass?** When the panel was last repainted with anything. **The server cannot know this.** It knows when it last *served* a response, not whether the device woke, fetched, decoded, or painted it — and after any outage it has no idea how long the sign has been showing something old.
 
-The "as of" stamp works because it converts (1) into a physical property of the image at render time. Whatever is on the glass then carries its own honesty with it, with no server, no network, and no power required. That is the entire reason it is load-bearing rather than a nicety.
+The "Updated at" stamp works because it converts (1) into a physical property of the image at render time. Whatever is on the glass then carries its own honesty with it, with no server, no network, and no power required. That is the entire reason it is load-bearing rather than a nicety.
 
 **Take the timestamp from OneBusAway's `currentTime`, not from our own clock at render time.** If OBA serves us stale or cached predictions, our render time overstates freshness — the sign would claim data is fresher than it is, which is the exact failure the stamp exists to prevent.
 
@@ -291,9 +291,9 @@ The "as of" stamp works because it converts (1) into a physical property of the 
 
 | # | How | Server can detect? | Defense |
 | --- | --- | --- | --- |
-| 1 | Worker down, device polls and fails | **No** — it is the thing that failed | On-image "as of" only |
-| 2 | Device offline, asleep, or WiFi-dead | **No** | On-image "as of" only |
-| 3 | Firmware's own error paths are slow or silent | No | On-image "as of" only |
+| 1 | Worker down, device polls and fails | **No** — it is the thing that failed | On-image "Updated at" only |
+| 2 | Device offline, asleep, or WiFi-dead | **No** | On-image "Updated at" only |
+| 3 | Firmware's own error paths are slow or silent | No | On-image "Updated at" only |
 | 4 | OBA down or empty while the Worker is up | Yes | Degraded screen with a distinct `filename` |
 | 5 | Real-time missing for some routes only | Yes | Per-row "Scheduled" label |
 
@@ -335,7 +335,15 @@ Real routes there: northbound `H Line, 5, 17, 21, 24, 27, 28, 33, 40, 56, 57, 62
 
 #### Two stops on one board — the layout, variant 9
 
-`.claude/tmp/cpu-spike/variant-9-two-stops.png`. Since both stops carry the **same name**, the name goes in the footer once and the groups are separated by a **light grey band** holding the direction and the stop code. Three departures per direction. The band is our invention — Metro's signs serve one stop, so they have no equivalent.
+`.claude/tmp/cpu-spike/variant-9-two-stops.png`. Since both stops carry the **same name**, the name goes in the footer once and the groups are separated by a **light grey band** holding the direction and the stop code. Four departures per direction, accepted 2026-08-01 after comparing against three — three left a visible dead band above the footer rule, and four fills the panel without the rows reading as cramped. The band is our invention — Metro's signs serve one stop, so they have no equivalent.
+
+**Row height is derived, not a constant — added 2026-08-01 when four rows landed.** `rowMetrics()` in `render/board.js` divides the space between the header and the footer rule by however many departures the board carries, and every size inside a row scales by that one factor. Three things about it are deliberate:
+
+- **It clamps to a 158px ceiling rather than stretching to fill.** A sparse board — one direction, or a stop with two departures left in the day — would otherwise stretch its rows across the whole panel. The accepted eight-row board comes in at 128 and is genuinely scaled; a two-row board hits the ceiling and is not.
+- **Horizontal metrics never scale.** Width is not the constraint, and holding the 152px badge slot fixed is what keeps the destination column in the same place across bus, rail, and any density.
+- **The clamp reserves a 12px gutter above the footer rule.** Without it the densest board that fits lands its bottom edge exactly on the rule and `pm` descenders come within a few pixels of crossing — fitting by arithmetic coincidence, and a later pixel shaved off the header would push them through with every test still passing.
+
+Row count still is **not** configuration. It follows from how many departures the data has, bounded by what fits.
 
 **Direction wording — decided 2026-08-01. Spell the bearing out, and allow a per-stop override.**
 
@@ -364,17 +372,19 @@ Decided 2026-08-01 against photographs of the real signs, kept in `.claude/tmp/c
 
 **Deliberately not kept:**
 
-- **`connectpoint` branding** → replaced by the OneBusAway mark, since OBA is our data source.
-- **Their two-column grid**, which is a 16:9 strip showing four departures with no destinations. We are 4:3 with room for six rows *and* destinations.
+- **`connectpoint` branding.** It was replaced by the OneBusAway mark for a while; the footer now credits nobody. See the asset note below — the mark is still in source, just not drawn.
+- **Their two-column grid**, which is a 16:9 strip showing four departures with no destinations. We are 4:3 with room for eight rows *and* destinations.
 - **The comma after the weekday.**
 - **Their service-alert block.** Not needed now; see the TODO.
 
 **Added because our sign can fail in ways theirs cannot:**
 
-- **The "as of" stamp**, bottom left beside the OBA mark. Metro's signs are wired, monitored and replaced when broken. Ours can freeze silently, so this is the only thing that makes a stale panel self-evident.
+- **The "Updated at" stamp**, bottom left, starting at the left margin now that no logo sits beside it. Metro's signs are wired, monitored and replaced when broken. Ours can freeze silently, so this is the only thing that makes a stale panel self-evident. The wording is deliberate: "Updated at 4:22 pm" states what happened, where the earlier "as of 4:22 pm" read as a hedge.
 - The stacked **day and date** in the header does double duty here — it is Metro's, but for us it is also the cue that catches a panel frozen since yesterday.
 
 **Asset notes.** The reversed (white) Metro logo comes from `cdn.kingcounty.gov/-/media/king-county/depts/metro/logo-art/metro/metro-logo-reversed-200x75` and is embedded as a base64 PNG in an `<image>` element. Brand rules are at `projects.seattletransitmap.com/library/King County Metro/Graphic Standards/7.0.2-p-Logo.pdf` — note that the Verdana it specifies applies to stationery address blocks, **not** to the signage face.
+
+**The OneBusAway mark is no longer drawn, decided 2026-08-01.** The footer is now just the "Updated at" stamp and the stop name, and the stamp starts at the left margin instead of clearing a logo. `obaMark()` and the pre-cleaned assets stay in `src/render/board.js` and `src/assets/` — putting the mark back is a one-line change, and the notes below are why re-deriving it would not be. Keep them.
 
 **The OneBusAway mark needs three fixes, not one.** Draw the backing plate ourselves rather than using the artwork's: the source plate is square while the vehicles inside it are far wider than tall, so a square wastes height and crowds the sides. Use `OneBusAway_Logo_Vehicles_Only.svg`, size the plate to the artwork's ~566:348 ratio, and pad the sides more than the top and bottom.
 
@@ -406,16 +416,16 @@ Also rejected: labelling every row `LIVE`/`SCHED` (variant B) spends ink and hor
 
 #### Accepted risk, decided 2026-08-01
 
-**Stale data on the glass is an accepted risk, on the condition that an "as of" stamp is always present and verifiable at a glance.** This is a deliberate call by the owner of the sign, not an oversight. It means:
+**Stale data on the glass is an accepted risk, on the condition that an "Updated at" stamp is always present and verifiable at a glance.** This is a deliberate call by the owner of the sign, not an oversight. It means:
 
 - **No hard staleness threshold is required.** The earlier plan to refuse countdowns past some age is downgraded from a requirement to an option. The stamp is the mechanism; arithmetic on the user's part is the fallback.
 - **The stamp's legibility becomes the load-bearing requirement.** "At a glance" is the whole condition being relied on, so the stamp must be readable from wherever the departures are readable. In the current mockups it is footer-sized, which is very likely not enough — treat sizing it as a real design task, not a caption.
-- The stamp must be unambiguous: include am/pm, and consider a day or date cue, since "as of 4:22" is meaningless if the panel froze yesterday.
+- The stamp must be unambiguous: include am/pm, and consider a day or date cue, since "Updated at 4:22" is meaningless if the panel froze yesterday.
 
 **One consequence worth understanding rather than just accepting.** An as-of stamp makes *clock times* self-verifying and does much less for *countdowns*:
 
-- "as of 4:22 pm" next to "4:26 pm" — one glance confirms both the departure and the freshness. If the panel froze, the row is still a true statement about a bus that has since left.
-- "as of 4:22 pm" next to "**4** min" — the reader has to do arithmetic to check it, and on a frozen panel the row is simply false, in the largest type on the sign.
+- "Updated at 4:22 pm" next to "4:26 pm" — one glance confirms both the departure and the freshness. If the panel froze, the row is still a true statement about a bus that has since left.
+- "Updated at 4:22 pm" next to "**4** min" — the reader has to do arithmetic to check it, and on a frozen panel the row is simply false, in the largest type on the sign.
 
 So the countdown remains the weakest element even with the stamp. It stays because it is the signature element of the Connectpoint design, but it is the first thing to reconsider if the sign ever misleads anyone in practice.
 
@@ -514,7 +524,7 @@ A query param cannot work: the firmware does `baseUrl + "/api/display"` with no 
 - Departures are `predictedArrivalTime` minus now, sorted ascending, filtered to the routes shown. **Dedup by `tripId`** — one stop can return the same trip more than once — and drop anything already in the past.
 - When real-time is missing, fall back to `scheduledArrivalTime` and **label it** — that is what Metro's own signs do, and an unlabeled scheduled time is a lie about a bus that may not exist.
 - Opposite directions are **two separate stop IDs**, not a field on one stop. `stop.direction` is a compass string (`N`, `NE`, `E`, …) in the same response.
-- `Intl.DateTimeFormat` with `timeZone: "America/Los_Angeles"` works under workerd. The "as of h:mm" stamp needs no tz library and no bundled tz data.
+- `Intl.DateTimeFormat` with `timeZone: "America/Los_Angeles"` works under workerd. The "Updated at h:mm" stamp needs no tz library and no bundled tz data.
 
 ## Configuration — nothing is hardcoded
 
@@ -553,6 +563,7 @@ Read `[vars]` only through `readConfig()` in `src/config.js`. Two things it exis
 
 - **Verify against primary sources, not memory.** The BYOS spec is evolving and the reference docs have been wrong twice already. Check the GPLv3 firmware at `github.com/usetrmnl/trmnl-firmware` and `usetrmnl/terminus` when the contract is ambiguous. Appending `.md` to a `docs.trmnl.com` path returns raw markdown; `usetrmnl.com` docs URLs now 301 to `trmnl.com`.
 - Run the test suite and linter when a change is done, and fix what they report.
+- **Regenerate `assets/bus.png` and `assets/light-rail.png` whenever the rendered design changes**, from `/_preview` or by driving `sampleBoards()` through the renderer directly. They are the README's screenshots, and its alt text describes them down to the row count — both went stale once already, first when the direction labels changed and again at three rows per direction. Update the alt text in the same commit.
 - **No repo `.gitignore`, deliberately.** `~/.gitignore_global` already covers every relevant path — `.dev.vars`, `.cloudflare.env`, `.wrangler`, `.npm-cache`, `.claude` (confirmed with `git check-ignore`). Add a repo `.gitignore` only if something appears that is genuinely specific to this repo and not already covered.
 - **`docs/TODO.md` is a work queue, not a record.** Finished items are deleted, not checked off — so anything worth keeping moves here, into the relevant doc, or into a code comment *before* the entry goes.
 - **Stack: plain JS, not TypeScript, and no framework.** One Worker, vitest for tests, eslint flat config. Do not add React; there is no SPA and there is not going to be one.

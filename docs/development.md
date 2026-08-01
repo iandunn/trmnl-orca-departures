@@ -33,7 +33,7 @@ Every BYOS endpoint currently answers **404 on purpose**, so `npm run dev` retur
 | `src/abuse.js` | Request classification, the bot tarpit, and the outcome vocabulary. |
 | `src/stats/` | The `/stats` page: `schema.js` (the Analytics Engine row), `analytics.js` (writes), `device-logs.js` (`/api/log` history), `query.js` (SQL reads), `render.js` (pure HTML), `handler.js` (auth). |
 | `src/config.js` | `readConfig()` — the only reader of `env` for a display or scheduling value. |
-| `src/clock.js` | `formatBoardTime()` — the header fields and the "as of" stamp, in the configured timezone. |
+| `src/clock.js` | `formatBoardTime()` — the header fields and the "Updated at" stamp, in the configured timezone. |
 | `src/routing.js` | Path parsing and the constant-time token comparison. |
 | `src/filename.js` | The content-hash cache key the device caches images by. |
 | `src/render/board.js` | The board as SVG, data-driven. Pure. |
