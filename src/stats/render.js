@@ -1,0 +1,1191 @@
+/**
+ * The `/stats` page, as one self-contained HTML string.
+ *
+ * ## Why every value goes through `escapeHtml()`
+ *
+ * This is the one page in the project that renders strings an attacker chose. `userAgent`,
+ * `probePath` and `networkOrganization` all arrive from the network, are stored verbatim by
+ * `src/stats/schema.js`, and are printed here — so a scanner can pick its own `User-Agent` and have
+ * it land in the owner's browser. A stored-XSS on a page whose whole purpose is telling the owner
+ * whether the sign's URL token has leaked would be the worst possible place to have one.
+ *
+ * `src/dev/preview.js` builds HTML by concatenation with no escaping, and that is fine there: every
+ * value it interpolates is a slug or title from `src/dev/sample-boards.js`, i.e. a fixture written
+ * in this repo. **This page cannot follow that precedent.** There is no partial version of the rule
+ * that survives editing, so the helpers below escape centrally — `dataTable()` escapes every cell,
+ * `checkRow()` escapes every field — and the only strings that reach the output unescaped are
+ * literals in this file.
+ *
+ * ## Why the page is inert
+ *
+ * No external CSS, JS, fonts or images: the page must be readable when the SQL API is down, and a
+ * dashboard that phones out to a CDN is a dashboard that fails differently than the thing it
+ * measures. The single piece of inline script is `onchange="this.form.submit()"` on the range
+ * picker, with a `<noscript>` submit button behind it, so the page works with scripting off.
+ *
+ * ## Why one broken query must not blank the page
+ *
+ * `buildStatsData()` resolves every panel independently and hands back a per-panel `*Error` string.
+ * Rendering those inside their own panel rather than as one page-level failure is the whole reason
+ * the queries were split: a page reporting nine good panels and one "query failed" is diagnostic,
+ * and a page rendering nothing because a `GROUP BY` was wrong is not.
+ */
+
+import { OUTCOMES, REJECTION_REASONS } from '../abuse.js';
+import { FILENAME_TAGS } from '../filename.js';
+
+// Aliased because the two datasets each declare their own sentinel and both are named
+// `ABSENT_NUMBER`. They happen to agree on the value, but they are separate contracts.
+import { ABSENT_NUMBER as ABSENT_LOG_NUMBER } from './device-logs.js';
+import { STATS_RANGES, resolveRange } from './query.js';
+import { ABSENT_NUMBER } from './schema.js';
+
+/**
+ * The three tones the page assigns meaning to. Everything else is neutral chrome.
+ *
+ * `REJECTED` is deliberately not the alarm colour: rejected traffic is the expected background noise
+ * of a public hostname, so painting it red would train the owner to ignore red. The alarm colour is
+ * reserved for the device-identity panel, where it means "someone else may be holding your token".
+ */
+const COLOR_SERVED = '#4fb3a0';
+const COLOR_REJECTED = '#c8913c';
+const COLOR_ALARM = '#ff6b5e';
+
+const HTML_ESCAPES = {
+	'&': '&amp;',
+	'<': '&lt;',
+	'>': '&gt;',
+	'"': '&quot;',
+	'\'': '&#39;',
+};
+
+/**
+ * Escapes text for both element and attribute context.
+ *
+ * Both quote characters are escaped, not just `<` and `&`, because the page puts data inside
+ * `title="…"` and `aria-label="…"` attributes — and an unescaped `"` there breaks out of the
+ * attribute without ever needing a `<`, which is the realistic bug in a page built by
+ * concatenation.
+ */
+export function escapeHtml( value ) {
+	return String( value ?? '' ).replace( /[&<>"']/g, ( character ) => HTML_ESCAPES[ character ] );
+}
+
+/**
+ * A human label per `OUTCOMES`.
+ *
+ * Keyed off the imported constants rather than retyped, because those strings are written into
+ * Analytics Engine as the index column and are therefore permanent — a copy here could drift from
+ * the real value and quietly label a whole row wrong.
+ */
+export const OUTCOME_LABELS = {
+	[ OUTCOMES.unshapedPath ]: 'Unshaped path (scanner)',
+	[ OUTCOMES.badToken ]: 'Wrong token',
+	[ OUTCOMES.badRequest ]: 'Misconfigured URL',
+	[ OUTCOMES.byosUnimplemented ]: 'Device poll, endpoint not built yet',
+	[ OUTCOMES.favicon ]: 'Favicon',
+	[ OUTCOMES.robots ]: 'robots.txt',
+	[ OUTCOMES.statsAuthFailed ]: 'Stats password rejected',
+};
+
+/** `REJECTION_REASONS` as sentences the owner can act on. */
+const REJECTION_REASON_LABELS = {
+	[ REJECTION_REASONS.missingAgency ]: 'The URL is missing its agency segment.',
+	[ REJECTION_REASONS.invalidAgency ]: 'The agency is not a number.',
+	[ REJECTION_REASONS.missingStop ]: 'The URL is missing its stop segment.',
+	[ REJECTION_REASONS.invalidStopId ]: 'A stop ID contains characters no OBA stop ID has.',
+	[ REJECTION_REASONS.tooManyStops ]: 'More than two stops were asked for.',
+	[ REJECTION_REASONS.malformedEscape ]: 'The stop segment has a broken percent-escape.',
+	[ REJECTION_REASONS.unknownRoute ]: 'The path is valid but names no endpoint.',
+};
+
+/** `FILENAME_TAGS` as board states, so the degraded-render rate is readable without a decoder. */
+const FILENAME_TAG_LABELS = {
+	[ FILENAME_TAGS.departures ]: 'Departures',
+	[ FILENAME_TAGS.noDepartures ]: 'No departures in the window',
+	[ FILENAME_TAGS.upstreamFailed ]: 'OneBusAway unavailable',
+	[ FILENAME_TAGS.renderFailed ]: 'Render failed',
+};
+
+/**
+ * Values of the `Image-Cached` header that mean the device skipped the download.
+ *
+ * A set of strings rather than a comparison, because the header's exact spelling is unverified —
+ * it is read back out of a blob column as text, and the firmware has not been observed sending it.
+ */
+const CACHED_HEADER_VALUES = new Set( [ '1', 'true', 'yes' ] );
+
+/**
+ * Device log levels that mean the sign is reporting a failure rather than narrating.
+ *
+ * These get the rejected tone rather than the alarm colour, for the same reason rejected traffic
+ * does: some error chatter is ordinary, and an alarm the owner learns to ignore is worse than none.
+ */
+const FAILURE_LOG_LEVELS = new Set( [ 'error', 'fatal' ] );
+
+/** Above this multiple of the expected poll count, a second device is the likeliest explanation. */
+const VOLUME_ALARM_MULTIPLE = 2;
+
+const CHART_WIDTH = 720;
+const CHART_HEIGHT = 130;
+
+function formatCount( value ) {
+	return Number( value ?? 0 ).toLocaleString( 'en-US' );
+}
+
+function formatPercent( value ) {
+	return `${ Number( value ).toFixed( 1 ) }%`;
+}
+
+function shareOf( count, total ) {
+	return total > 0 ? ( count / total ) * 100 : 0;
+}
+
+/** Doubles come back out of Analytics Engine as strings, so nothing here compares with `===`. */
+function toNumber( value ) {
+	const parsed = Number( value );
+
+	return Number.isFinite( parsed ) ? parsed : ABSENT_NUMBER;
+}
+
+const utf8Encoder = new TextEncoder();
+
+/**
+ * The byte length of a string.
+ *
+ * Bytes rather than characters because the length it gets compared against was measured in bytes on
+ * the way in, and a firmware message is free text that may not be ASCII.
+ */
+function byteLength( text ) {
+	return utf8Encoder.encode( String( text ?? '' ) ).length;
+}
+
+function labelFor( labels, value ) {
+	return labels[ value ] ?? value ?? '';
+}
+
+function none() {
+	return '<p class="none">none</p>';
+}
+
+function queryFailed( message ) {
+	return `<p class="query-error">query failed: ${ escapeHtml( message ) }</p>`;
+}
+
+/**
+ * One panel.
+ *
+ * @param {object} options
+ * @param {string} options.title
+ * @param {string} [options.tooltip]   Plain text, escaped here.
+ * @param {string} [options.error]     A per-panel `*Error` string; renders inside this panel only.
+ * @param {string} options.bodyHtml    Already-escaped markup from the helpers below.
+ */
+function panel( { title, tooltip = '', error = '', bodyHtml } ) {
+	const tooltipAttribute = tooltip ? ` title="${ escapeHtml( tooltip ) }"` : '';
+
+	return (
+		'<section class="panel">' +
+		`<h2${ tooltipAttribute }>${ escapeHtml( title ) }</h2>` +
+		( error ? queryFailed( error ) : '' ) +
+		bodyHtml +
+		'</section>'
+	);
+}
+
+function note( text ) {
+	return `<p class="note">${ escapeHtml( text ) }</p>`;
+}
+
+/** A ranked horizontal bar. `tone` is `served` or `rejected`. */
+function barRow( { label, count, total, tone } ) {
+	return (
+		'<li class="bar">' +
+		`<span class="bar-label">${ escapeHtml( label ) }</span>` +
+		'<span class="bar-track">' +
+		`<span class="bar-fill ${ tone }" style="width:${ formatPercent( shareOf( count, total ) ) }"></span>` +
+		'</span>' +
+		`<span class="bar-count">${ escapeHtml( formatCount( count ) ) }</span>` +
+		'</li>'
+	);
+}
+
+function barList( rows ) {
+	return rows.length === 0 ? none() : `<ul class="bars">${ rows.join( '' ) }</ul>`;
+}
+
+/**
+ * One cell. Text, or `{ text, title }` when the value needs a tooltip to be honest about itself.
+ *
+ * The object form exists so a caller that needs an attribute does not have to build its own `<td>`,
+ * which is how the escaping invariant below would eventually get broken.
+ */
+function tableCell( cell ) {
+	if ( cell && typeof cell === 'object' ) {
+		return `<td title="${ escapeHtml( cell.title ) }">${ escapeHtml( cell.text ) }</td>`;
+	}
+
+	return `<td>${ escapeHtml( cell ) }</td>`;
+}
+
+/**
+ * A table whose every cell is escaped here, so no caller can forget.
+ *
+ * Wrapped in its own scroll container: the recent-rejections table is wider than a phone and the
+ * page itself must never scroll sideways.
+ */
+function dataTable( headings, rows ) {
+	if ( rows.length === 0 ) {
+		return none();
+	}
+
+	const head = headings.map( ( heading ) => `<th>${ escapeHtml( heading ) }</th>` ).join( '' );
+
+	const body = rows.map( ( cells ) => `<tr>${ cells.map( tableCell ).join( '' ) }</tr>` ).join( '' );
+
+	return `<div class="scroll"><table><thead><tr>${ head }</tr></thead><tbody>${ body }</tbody></table></div>`;
+}
+
+/**
+ * One line of the device-identity panel.
+ *
+ * The normal state of every check is one calm line, so an anomaly is the only thing on the page
+ * carrying the alarm colour. `detailHtml` is markup, not text — the caller has already escaped it.
+ */
+function checkRow( { label, value, alarm, detailHtml = '' } ) {
+	return (
+		`<li class="check ${ alarm ? 'alarm' : 'ok' }">` +
+		`<span class="check-state">${ alarm ? 'ALARM' : 'ok' }</span>` +
+		'<span class="check-body">' +
+		`<span class="check-label">${ escapeHtml( label ) }</span>` +
+		`<span class="check-value">${ escapeHtml( value ) }</span>` +
+		detailHtml +
+		'</span>' +
+		'</li>'
+	);
+}
+
+function rangePicker( range ) {
+	const options = STATS_RANGES.map(
+		( candidate ) =>
+			`<option value="${ escapeHtml( candidate.key ) }"${ candidate.key === range ? ' selected' : '' }>` +
+			`${ escapeHtml( candidate.label ) }</option>`
+	).join( '' );
+
+	return (
+		'<form method="get" class="range">' +
+		'<label for="range">Range</label>' +
+		`<select id="range" name="range" onchange="this.form.submit()">${ options }</select>` +
+		'<noscript><button type="submit">Update</button></noscript>' +
+		'</form>'
+	);
+}
+
+/* ------------------------------------------------------------------ sections */
+
+/**
+ * The compromise alarm.
+ *
+ * Deliberately not a breakdown table. The sign is one device on one network, so every number here
+ * is a constant in normal operation — which is exactly what makes a deviation legible. The panel is
+ * built so the calm state is four quiet lines and any anomaly is the loudest thing on the page.
+ */
+function identitySection( identity ) {
+	const networkCount = identity.networks.length;
+
+	const networkDetail =
+		networkCount > 1
+			? dataTable(
+					[ 'ASN', 'Network', 'Country', 'Requests', 'Last seen' ],
+					identity.networks.map( ( row ) => [
+						row.asn,
+						row.organization,
+						row.country,
+						formatCount( row.count ),
+						row.lastSeen,
+					] )
+			  )
+			: '';
+
+	const networkValue = ( () => {
+		if ( networkCount === 0 ) {
+			return 'No authenticated requests yet.';
+		}
+
+		if ( networkCount === 1 ) {
+			const [ only ] = identity.networks;
+
+			return `1 network: ${ only.organization || 'unknown' } (${ only.asn || 'no ASN' }, ${ only.country || '??' })`;
+		}
+
+		return `${ networkCount } distinct networks — expected exactly one`;
+	} )();
+
+	const firmwareDetail =
+		identity.firmware.length > 1
+			? dataTable(
+					[ 'Firmware', 'Model', 'Width', 'Height', 'Requests', 'Last seen' ],
+					identity.firmware.map( ( row ) => [
+						row.firmwareVersion,
+						row.model,
+						row.width,
+						row.height,
+						formatCount( row.count ),
+						row.lastSeen,
+					] )
+			  )
+			: '';
+
+	const firmwareValue = ( () => {
+		if ( identity.firmware.length === 0 ) {
+			return 'No authenticated requests yet.';
+		}
+
+		if ( identity.firmware.length === 1 ) {
+			const [ only ] = identity.firmware;
+
+			return `${ only.firmwareVersion || 'unknown build' } on model ${ only.model || '?' }, ` +
+				`${ only.width || '?' } x ${ only.height || '?' }`;
+		}
+
+		return `${ identity.firmware.length } distinct firmware, model or geometry combinations — ` +
+			'suggests a second physical device';
+	} )();
+
+	// Ratio rather than difference, and only flagged at roughly double: the expectation is derived
+	// from config and is approximate by construction, so a tight threshold would cry wolf daily.
+	const volumeAlarm =
+		identity.expectedRequests > 0 &&
+		identity.authorizedRequests >= identity.expectedRequests * VOLUME_ALARM_MULTIPLE;
+
+	const checks = [
+		checkRow( {
+			label: 'Networks on authenticated requests',
+			value: networkValue,
+			alarm: networkCount > 1,
+			detailHtml: networkDetail,
+		} ),
+
+		checkRow( {
+			label: 'Enrollment calls',
+			value:
+				identity.setupCalls > 0
+					? `${ formatCount( identity.setupCalls ) } — enrollment should only happen when you re-pair ` +
+						'the device, so any call you did not cause means something else enrolled'
+					: 'none',
+			alarm: identity.setupCalls > 0,
+		} ),
+
+		checkRow( {
+			label: 'Firmware and panel geometry',
+			value: firmwareValue,
+			alarm: identity.firmware.length > 1,
+			detailHtml: firmwareDetail,
+		} ),
+
+		checkRow( {
+			label: 'Poll volume',
+			value:
+				`${ formatCount( identity.authorizedRequests ) } authenticated vs ` +
+				`~${ formatCount( identity.expectedRequests ) } expected`,
+			alarm: volumeAlarm,
+			detailHtml: note(
+				'The expectation is approximate: the device wakes to poll rather than on a wall clock, so ' +
+					'treat anything within a factor of two as normal. Roughly double is what two devices ' +
+					'sharing one token looks like.'
+			),
+		} ),
+	];
+
+	return panel( {
+		title: 'Device identity',
+		tooltip:
+			'How a leaked URL token would be detected. The token rides in the URL path, so anyone who ' +
+			'has the URL authenticates successfully — a second network, a second firmware build, or an ' +
+			'enrollment you did not cause is the only signal that would ever exist.',
+		bodyHtml: `<ul class="checks">${ checks.join( '' ) }</ul>`,
+	} );
+}
+
+function totalsSection( totals ) {
+	const tiles = [
+		[ 'Requests', totals.total, '' ],
+		[ 'Authenticated', totals.authorized, 'served' ],
+		[ 'Rejected', totals.rejected, 'rejected' ],
+	].map(
+		( [ label, count, tone ] ) =>
+			`<div class="tile ${ tone }"><span class="tile-value">${ escapeHtml( formatCount( count ) ) }</span>` +
+			`<span class="tile-label">${ escapeHtml( label ) }</span></div>`
+	).join( '' );
+
+	const splitLabel = `${ formatCount( totals.authorized ) } authenticated, ${ formatCount( totals.rejected ) } rejected`;
+
+	return panel( {
+		title: 'Request totals',
+		bodyHtml:
+			`<div class="tiles">${ tiles }</div>` +
+			`<div class="split" role="img" aria-label="${ escapeHtml( splitLabel ) }">` +
+			`<span class="split-part served" style="width:${ formatPercent( shareOf( totals.authorized, totals.total ) ) }"></span>` +
+			`<span class="split-part rejected" style="width:${ formatPercent( shareOf( totals.rejected, totals.total ) ) }"></span>` +
+			'</div>' +
+			'<ul class="legend">' +
+			`<li><span class="swatch served"></span>authenticated ${ escapeHtml( formatCount( totals.authorized ) ) }</li>` +
+			`<li><span class="swatch rejected"></span>rejected ${ escapeHtml( formatCount( totals.rejected ) ) }</li>` +
+			'</ul>',
+	} );
+}
+
+function outcomesSection( outcomes ) {
+	const total = outcomes.reduce( ( sum, row ) => sum + row.count, 0 );
+
+	const rows = [ ...outcomes ]
+		.sort( ( first, second ) => second.count - first.count )
+		.map( ( row ) =>
+			barRow( {
+				label: labelFor( OUTCOME_LABELS, row.outcome ),
+				count: row.count,
+				total,
+				tone: row.authorized ? 'served' : 'rejected',
+			} )
+		);
+
+	return panel( { title: 'Outcome breakdown', bodyHtml: barList( rows ) } );
+}
+
+/**
+ * The flicker rate, and the refresh rate the device believes in.
+ *
+ * `Image-Cached` is the most important number on the page after the identity panel: the whole design
+ * bets on the `filename` cache no-op, because the X takes a full-panel refresh every time a changed
+ * image reaches it. A cache-hit rate near zero means the filename is churning and the sign is
+ * flashing on every poll.
+ */
+function panelHealthSection( panelData ) {
+	const cachedTotal = panelData.imageCached.reduce( ( sum, row ) => sum + row.count, 0 );
+
+	const cachedCount = panelData.imageCached
+		.filter( ( row ) => CACHED_HEADER_VALUES.has( String( row.imageCached ).trim().toLowerCase() ) )
+		.reduce( ( sum, row ) => sum + row.count, 0 );
+
+	const cachedMetric =
+		cachedTotal === 0
+			? '<p class="none">no authenticated wakes yet, so nothing has reported a cache result</p>'
+			: `<p class="metric"><strong>${ escapeHtml( formatPercent( shareOf( cachedCount, cachedTotal ) ) ) }</strong>` +
+				'<span>of wakes skipped the download, and so did not repaint the panel</span></p>';
+
+	const cachedRows = panelData.imageCached.map( ( row ) =>
+		barRow( {
+			label: CACHED_HEADER_VALUES.has( String( row.imageCached ).trim().toLowerCase() )
+				? `cached (${ row.imageCached })`
+				: `downloaded (${ row.imageCached || 'no header' })`,
+			count: row.count,
+			total: cachedTotal,
+			tone: 'served',
+		} )
+	);
+
+	const echoTotal = panelData.refreshEcho.reduce( ( sum, row ) => sum + row.count, 0 );
+
+	const echoRows = panelData.refreshEcho.map( ( row ) => {
+		const seconds = toNumber( row.refreshRateEcho );
+		const hotLoop = seconds === 0;
+
+		return barRow( {
+			label: hotLoop
+				? '0 seconds — the hot-loop bug, this flattens the battery'
+				: `${ seconds === ABSENT_NUMBER ? 'not reported' : `${ seconds } seconds` }`,
+			count: row.count,
+			total: echoTotal,
+			tone: hotLoop ? 'rejected' : 'served',
+		} );
+	} );
+
+	return (
+		panel( {
+			title: 'Panel health',
+			tooltip:
+				'The Image-Cached header reports the outcome of the *previous* wake, not the one carrying ' +
+				'it, so read the rate rather than any single row.',
+			error: panelData.imageCachedError,
+
+			// The bar list is suppressed when there is nothing to chart, because its own empty state
+			// would otherwise print a bare "none" directly under a sentence that already explained why.
+			bodyHtml: cachedMetric + ( cachedTotal === 0 ? '' : barList( cachedRows ) ),
+		} ) +
+		panel( {
+			title: 'Refresh rate echo',
+			tooltip:
+				'What the device read back out of NVS. A value of 0 is the hot-loop bug: the device sleeps ' +
+				'for no time at all and stays that way across power cycles.',
+			error: panelData.refreshEchoError,
+			bodyHtml: barList( echoRows ),
+		} )
+	);
+}
+
+/**
+ * The battery chart.
+ *
+ * -1 is the firmware's own value for a fuel gauge that failed to initialise, and it is also what
+ * `src/stats/schema.js` writes for an absent header. Plotting it would put a point far below the
+ * axis and drag the whole line flat, so those points are dropped from the series rather than
+ * clamped — a gap in the line is honest about a missing reading in a way that a 0 is not.
+ */
+function batterySection( battery ) {
+	const usable = battery.series.filter( ( point ) => toNumber( point.percent ) > ABSENT_NUMBER );
+	const latest = battery.series[ battery.series.length - 1 ];
+
+	const reading = ( value, suffix ) => {
+		const number = toNumber( value );
+
+		return number <= ABSENT_NUMBER ? 'no data' : `${ number.toFixed( suffix === 'V' ? 2 : 0 ) } ${ suffix }`;
+	};
+
+	const summary = latest
+		? `<p class="metric"><strong>${ escapeHtml( reading( latest.percent, '%' ) ) }</strong>` +
+			`<span>latest charge, ${ escapeHtml( reading( latest.voltage, 'V' ) ) }, ` +
+			`as of ${ escapeHtml( latest.bucket ) }</span></p>`
+		: '<p class="none">no authenticated wakes yet, so the device has reported no battery readings</p>';
+
+	const excluded = battery.series.length - usable.length;
+
+	const excludedNote =
+		excluded > 0
+			? note(
+					`${ excluded } of ${ battery.series.length } buckets reported no charge reading and are ` +
+						'left out of the chart rather than plotted as -1.'
+			  )
+			: '';
+
+	return panel( {
+		title: 'Battery',
+		error: battery.error,
+
+		// Same reason as the cache bars above: with no series at all, `summary` has already said so, and
+		// the chart's own empty state would repeat it as a bare "none".
+		bodyHtml: summary + ( battery.series.length === 0 ? '' : batteryChart( usable ) + excludedNote ),
+	} );
+}
+
+function batteryChart( usable ) {
+	if ( usable.length === 0 ) {
+		return none();
+	}
+
+	const points = usable.map( ( point, index ) => {
+		// A single reading has no span to spread across, so it sits in the middle rather than dividing
+		// by zero.
+		const x = usable.length === 1 ? CHART_WIDTH / 2 : ( index / ( usable.length - 1 ) ) * CHART_WIDTH;
+		const y = CHART_HEIGHT - ( Math.min( 100, Math.max( 0, toNumber( point.percent ) ) ) / 100 ) * CHART_HEIGHT;
+
+		return `${ x.toFixed( 1 ) },${ y.toFixed( 1 ) }`;
+	} );
+
+	const gridlines = [ 0, 50, 100 ].map( ( level ) => {
+		const y = ( CHART_HEIGHT - ( level / 100 ) * CHART_HEIGHT ).toFixed( 1 );
+
+		return `<line x1="0" y1="${ y }" x2="${ CHART_WIDTH }" y2="${ y }" class="grid"></line>`;
+	} ).join( '' );
+
+	const label = `charge over ${ usable.length } buckets, from ${ usable[ 0 ].bucket } to ${ usable[ usable.length - 1 ].bucket }`;
+
+	return (
+		`<svg class="chart" viewBox="0 0 ${ CHART_WIDTH } ${ CHART_HEIGHT }" preserveAspectRatio="none" ` +
+		`role="img" aria-label="${ escapeHtml( label ) }">` +
+		gridlines +
+		`<polyline class="series" points="${ points.join( ' ' ) }"></polyline>` +
+		'</svg>'
+	);
+}
+
+function renderOutcomesSection( renderOutcomes ) {
+	const total = renderOutcomes.rows.reduce( ( sum, row ) => sum + row.count, 0 );
+
+	const rows = renderOutcomes.rows.map( ( row ) =>
+		barRow( {
+			label: labelFor( FILENAME_TAG_LABELS, row.filenameTag ),
+			count: row.count,
+			total,
+			tone: row.filenameTag === FILENAME_TAGS.departures ? 'served' : 'rejected',
+		} )
+	);
+
+	return panel( {
+		title: 'Render outcomes',
+		tooltip:
+			'Which board state was served, from the filename tag. Anything other than Departures is a ' +
+			'degraded screen.',
+		error: renderOutcomes.error,
+		bodyHtml: barList( rows ),
+	} );
+}
+
+/**
+ * A `-1` device-log reading as words.
+ *
+ * Compared with strict equality rather than `<=`, unlike the battery readings above: WiFi signal is
+ * legitimately negative, so treating everything below the sentinel as absent would report every
+ * real reading the device ever sends as missing. `toNumber()` already collapses unparseable values
+ * onto the sentinel, so equality still catches those.
+ */
+function logReading( value, format ) {
+	const number = toNumber( value );
+
+	return number === ABSENT_LOG_NUMBER ? 'no data' : format( number );
+}
+
+/** `path:line`, the pair that turns a failure into a specific line of firmware. */
+function sourceLocation( entry ) {
+	const line = toNumber( entry.sourceLine );
+
+	if ( ! entry.sourcePath ) {
+		return '';
+	}
+
+	return line === ABSENT_LOG_NUMBER ? entry.sourcePath : `${ entry.sourcePath }:${ line }`;
+}
+
+/**
+ * The message, marked when it was clipped on the way into storage.
+ *
+ * `messageBytes` is the length the device sent, before truncation, so the two disagreeing is the
+ * only way to know the text on screen is not the whole diagnostic. An unmarked clipped message is
+ * worse than a short one, because it reads as a complete sentence that happens to stop early.
+ */
+function messageCell( entry ) {
+	const kept = byteLength( entry.message );
+	const sent = toNumber( entry.messageBytes );
+
+	if ( sent <= kept ) {
+		return entry.message;
+	}
+
+	return {
+		text: `${ entry.message }…`,
+		title:
+			`clipped on write: the device sent ${ formatCount( sent ) } bytes and ` +
+			`${ formatCount( kept ) } were kept`,
+	};
+}
+
+/**
+ * What the device says about itself.
+ *
+ * `/api/log` is the only channel back from a sign that is rendering nothing, which makes this the
+ * one panel that can explain a failure the request rows cannot see at all: every other panel here
+ * is built from what the server observed, and a device that never woke leaves no request row.
+ */
+function deviceLogsSection( deviceLogs ) {
+	const levelTotal = deviceLogs.levels.reduce( ( sum, row ) => sum + row.count, 0 );
+
+	const levelRows = deviceLogs.levels.map( ( row ) =>
+		barRow( {
+			label: row.level || 'no level',
+			count: row.count,
+			total: levelTotal,
+			tone: FAILURE_LOG_LEVELS.has( String( row.level ).trim().toLowerCase() ) ? 'rejected' : 'served',
+		} )
+	);
+
+	const entryRows = deviceLogs.entries.map( ( entry ) => [
+		entry.timestamp,
+		entry.level,
+		messageCell( entry ),
+		sourceLocation( entry ),
+		entry.firmwareVersion,
+		logReading( entry.freeHeapSize, ( bytes ) => `${ formatCount( bytes ) } bytes` ),
+		logReading( entry.wifiSignal, ( strength ) => `${ strength } dBm` ),
+	] );
+
+	const isEmpty = deviceLogs.levels.length === 0 && deviceLogs.entries.length === 0;
+	const anyError = Boolean( deviceLogs.levelsError || deviceLogs.entriesError );
+	const entriesFailure = deviceLogs.entriesError ? queryFailed( deviceLogs.entriesError ) : '';
+
+	// An empty panel only claims to be expected state when nothing failed, for the same reason the
+	// page-level banner does: "expected" printed beside "query failed" is the page lying about itself.
+	const emptyBody = anyError
+		? entriesFailure
+		: '<p class="none">no device logs yet, which is the expected state: /api/log is not ' +
+			'implemented on this Worker, so the device has no way to file one</p>';
+
+	return panel( {
+		title: 'Device logs',
+		tooltip:
+			'What the device reports through /api/log. The source path and line name the exact line of ' +
+			'firmware that produced the entry — the firmware is open source, so that pair is a ' +
+			'definitive answer rather than a guess about what went wrong, which is the whole reason ' +
+			'it is stored.',
+		error: deviceLogs.levelsError,
+		bodyHtml: isEmpty
+			? emptyBody
+			: barList( levelRows ) +
+				entriesFailure +
+				dataTable(
+					[ 'When', 'Level', 'Message', 'Source', 'Firmware', 'Free heap', 'WiFi' ],
+					entryRows
+				) +
+				note(
+					'Free heap is recorded because out-of-memory is one of the failure modes that draws nothing ' +
+						'at all, forever, and it is invisible in every other signal on this page.'
+				),
+	} );
+}
+
+function badRequestsSection( badRequests ) {
+	const rows = badRequests.rows.map( ( row ) => [
+		labelFor( REJECTION_REASON_LABELS, row.reason ),
+		row.agency,
+		row.stopIds,
+		formatCount( row.count ),
+	] );
+
+	return panel( {
+		title: 'Configuration errors',
+		tooltip: 'A caller holding the right token whose URL will not parse — almost always a pairing typo.',
+		error: badRequests.error,
+		bodyHtml:
+			dataTable( [ 'Problem', 'Agency', 'Stop IDs', 'Requests' ], rows ) +
+			note(
+				'Stop IDs are shown deliberately, because "which stop was this failing request for" is the ' +
+					'question this panel exists to answer. A screenshot of this page therefore carries the ' +
+					'sign\'s location.'
+			),
+	} );
+}
+
+function rejectionsSection( rejections ) {
+	const sourceRows = rejections.sources.map( ( row ) => [
+		row.country,
+		row.organization,
+		row.userAgent,
+		formatCount( row.count ),
+	] );
+
+	const probeTotal = rejections.probePaths.reduce( ( sum, row ) => sum + row.count, 0 );
+
+	const probeRows = rejections.probePaths.map( ( row ) =>
+		barRow( { label: row.probePath, count: row.count, total: probeTotal, tone: 'rejected' } )
+	);
+
+	return panel( {
+		title: 'Rejections',
+		tooltip:
+			'Who is scanning the hostname. Probe paths are allow-list filtered before they are recorded, ' +
+			'so anything that could have been a secret shows as [redacted].',
+		bodyHtml:
+			'<div class="columns">' +
+			'<div><h3>Sources</h3>' +
+			( rejections.sourcesError ? queryFailed( rejections.sourcesError ) : '' ) +
+			dataTable( [ 'Country', 'Network', 'User agent', 'Requests' ], sourceRows ) +
+			'</div>' +
+			'<div><h3>Probe paths</h3>' +
+			( rejections.probePathsError ? queryFailed( rejections.probePathsError ) : '' ) +
+			barList( probeRows ) +
+			'</div>' +
+			'</div>',
+	} );
+}
+
+function recentSection( recent ) {
+	const rows = recent.rows.map( ( row ) => [
+		row.timestamp,
+		labelFor( OUTCOME_LABELS, row.outcome ),
+		row.country,
+		row.organization,
+		row.userAgent,
+		row.probePath,
+	] );
+
+	return panel( {
+		title: 'Recent rejections',
+		error: recent.error,
+		bodyHtml: dataTable( [ 'When', 'Outcome', 'Country', 'Network', 'User agent', 'Path' ], rows ),
+	} );
+}
+
+/**
+ * The banner for an empty dataset.
+ *
+ * Worded as expected state rather than failure on purpose: the BYOS endpoints are deliberately
+ * unimplemented, so there is no authenticated traffic yet and the panels that filter on it are
+ * empty by design. A dashboard that looks broken when it is correct is a dashboard nobody trusts
+ * later, when it is reporting something real.
+ */
+function emptyBanner( rangeLabel ) {
+	return (
+		'<p class="banner">' +
+		escapeHtml(
+			`No requests recorded in ${ rangeLabel }. That is the expected state on a Worker nothing has ` +
+				'found yet: rejections only appear once a scanner arrives, and the authenticated panels — ' +
+				'panel health, battery and render outcomes — stay empty until the BYOS endpoints exist and ' +
+				'a device is paired.'
+		) +
+		'</p>'
+	);
+}
+
+const STYLES =
+	':root{color-scheme:dark;' +
+	`--served:${ COLOR_SERVED };--rejected:${ COLOR_REJECTED };--alarm:${ COLOR_ALARM };` +
+	'--bg:#2c2c2c;--panel:#383838;--line:#4a4a4a;--text:#ececec;--muted:#a2a2a2;--link:#9cf}' +
+	'*{box-sizing:border-box}' +
+	'body{margin:0;padding:20px;background:var(--bg);color:var(--text);' +
+	'font:14px/1.45 system-ui,sans-serif;overflow-x:hidden}' +
+	'h1{font-size:18px;margin:0}' +
+	'h2{font-size:14px;font-weight:600;margin:0 0 12px}' +
+	'h3{font-size:13px;font-weight:600;margin:0 0 8px;color:var(--muted)}' +
+	'h2[title]{border-bottom:1px dotted var(--muted);display:inline-block;cursor:help}' +
+	'header{display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;' +
+	'justify-content:space-between;margin-bottom:18px}' +
+	'.range{display:flex;gap:8px;align-items:center}' +
+	'.range label{color:var(--muted)}' +
+	'select,button{background:var(--panel);color:var(--text);border:1px solid var(--line);' +
+	'border-radius:4px;padding:4px 6px;font:inherit}' +
+	'.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;' +
+	'padding:14px;margin-bottom:14px}' +
+	'.banner{background:#3d3a2a;border:1px solid #6b5f30;border-radius:6px;padding:12px;margin:0 0 14px}' +
+	'.banner.error{background:#452c2c;border-color:#7a4040}' +
+	'.query-error{color:var(--alarm);margin:0 0 10px;font-family:ui-monospace,monospace;font-size:12px}' +
+	'.none{color:var(--muted);margin:0}' +
+	'.note{color:var(--muted);font-size:12px;margin:10px 0 0}' +
+	'.metric{margin:0 0 12px;display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}' +
+	'.metric strong{font-size:26px;font-weight:700}' +
+	'.metric span{color:var(--muted)}' +
+	'.tiles{display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px}' +
+	'.tile{flex:1 1 130px;border:1px solid var(--line);border-radius:5px;padding:10px;' +
+	'display:flex;flex-direction:column;gap:2px}' +
+	'.tile-value{font-size:24px;font-weight:700}' +
+	'.tile-label{color:var(--muted);font-size:12px}' +
+	'.tile.served{border-left:3px solid var(--served)}' +
+	'.tile.rejected{border-left:3px solid var(--rejected)}' +
+	'.split{display:flex;height:12px;border-radius:6px;overflow:hidden;background:#4a4a4a}' +
+	'.split-part.served,.bar-fill.served,.swatch.served{background:var(--served)}' +
+	'.split-part.rejected,.bar-fill.rejected,.swatch.rejected{background:var(--rejected)}' +
+	'.legend{list-style:none;display:flex;flex-wrap:wrap;gap:14px;margin:8px 0 0;padding:0;' +
+	'color:var(--muted);font-size:12px}' +
+	'.legend li{display:flex;gap:6px;align-items:center}' +
+	'.swatch{width:10px;height:10px;border-radius:2px}' +
+	'.bars{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}' +
+	'.bar{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) auto;gap:10px;align-items:center}' +
+	'.bar-label{overflow-wrap:anywhere}' +
+	'.bar-track{background:#4a4a4a;border-radius:4px;height:12px;overflow:hidden}' +
+	'.bar-fill{display:block;height:100%}' +
+	'.bar-count{font-variant-numeric:tabular-nums;color:var(--muted)}' +
+	'.checks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}' +
+	'.check{display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:5px;' +
+	'border:1px solid var(--line)}' +
+	'.check-body{display:flex;flex-direction:column;gap:2px;min-width:0}' +
+	'.check-label{color:var(--muted);font-size:12px}' +
+	'.check-value{overflow-wrap:anywhere}' +
+	'.check-state{font-size:11px;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:3px;' +
+	'background:#4a4a4a;color:var(--muted);flex:none}' +
+	'.check.alarm{border-color:var(--alarm);background:#432c2b}' +
+	'.check.alarm .check-state{background:var(--alarm);color:#1a1a1a}' +
+	'.check.alarm .check-value{font-weight:600;font-size:16px}' +
+	'.columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px}' +
+	'.scroll{overflow-x:auto;max-width:100%}' +
+	'table{border-collapse:collapse;font-size:12px;min-width:100%}' +
+	'th,td{text-align:left;padding:5px 10px 5px 0;border-bottom:1px solid var(--line);' +
+	'white-space:nowrap;vertical-align:top}' +
+	'th{color:var(--muted);font-weight:600}' +
+	'td[title]{cursor:help}' +
+	'.chart{width:100%;height:130px;display:block}' +
+	'.chart .grid{stroke:var(--line);stroke-width:1}' +
+	'.chart .series{fill:none;stroke:var(--served);stroke-width:2;vector-effect:non-scaling-stroke}';
+
+/**
+ * The whole page.
+ *
+ * @param   {object} data From `buildStatsData()` in `./query.js`.
+ * @returns {string} A complete HTML document.
+ */
+export function renderStatsHtml( data ) {
+	const showEmptyBanner = data.totals.total === 0 && ! data.errorMessage;
+
+	return (
+		'<!doctype html><html lang="en"><head><meta charset="utf-8">' +
+		'<meta name="viewport" content="width=device-width,initial-scale=1">' +
+		// Not a security control — the page is password gated — but a scanner that indexes it would
+		// republish the sign's stop IDs, which is the one value on here that implies an address.
+		'<meta name="robots" content="noindex">' +
+		`<title>Sign stats &middot; ${ escapeHtml( data.rangeLabel ) }</title>` +
+		`<style>${ STYLES }</style></head><body>` +
+		'<header><h1>Sign stats</h1>' +
+		`${ rangePicker( data.range ) }</header>` +
+		( data.errorMessage ? `<p class="banner error">${ escapeHtml( `query failed: ${ data.errorMessage }` ) }</p>` : '' ) +
+		( showEmptyBanner ? emptyBanner( data.rangeLabel ) : '' ) +
+		identitySection( data.identity ) +
+		totalsSection( data.totals ) +
+		outcomesSection( data.outcomes ) +
+		panelHealthSection( data.panel ) +
+		batterySection( data.battery ) +
+		renderOutcomesSection( data.renderOutcomes ) +
+		deviceLogsSection( data.deviceLogs ) +
+		badRequestsSection( data.badRequests ) +
+		rejectionsSection( data.rejections ) +
+		recentSection( data.recent ) +
+		'</body></html>'
+	);
+}
+
+/**
+ * Mock data in exactly the shape `buildStatsData()` returns, for iterating on this page without an
+ * Analytics Engine dataset or a Cloudflare API token.
+ *
+ * Two things are deliberate rather than incidental. **Every timestamp is a fixed literal** — a
+ * `Date.now()` here would make any test that renders the mock non-deterministic. And **the stop IDs
+ * are the downtown Seattle samples** from `CLAUDE.md`, never the stop this sign points at, because
+ * this is a tracked file.
+ *
+ * The dataset is chosen to exercise the page's hard cases at once: a second network and a non-zero
+ * enrollment count so both alarms are visible, a battery bucket with no charge reading so the
+ * exclusion path runs, a device log entry with no heap or signal reading and another whose message
+ * was clipped on write, and an injection payload in every attacker-controlled string field so the
+ * escaping is exercised rather than assumed.
+ */
+export function buildMockStatsData( rangeKey ) {
+	const range = resolveRange( rangeKey );
+	const injection = '<img src=x onerror=alert(1)>';
+
+	// A distinct payload per field group, so a test can count occurrences of one and know which field
+	// stopped rendering rather than only that the total moved.
+	const logInjection = '<img src=x onerror=alert(3)>';
+
+	// `messageBytes` is the length the device sent, before truncation, so it is derived rather than
+	// typed: a hand-counted number one byte high would mark an intact message as clipped, and the one
+	// entry that is genuinely clipped says so by overriding it.
+	const logEntry = ( entry ) => ( { messageBytes: byteLength( entry.message ), ...entry } );
+
+	return {
+		range: range.key,
+		rangeLabel: range.label,
+		rangeDays: range.days,
+		errorMessage: '',
+
+		totals: { total: 21840, authorized: 19102, rejected: 2738 },
+
+		outcomes: [
+			{ outcome: OUTCOMES.byosUnimplemented, count: 19099, authorized: true },
+			{ outcome: OUTCOMES.unshapedPath, count: 2461, authorized: false },
+			{ outcome: OUTCOMES.badToken, count: 214, authorized: false },
+			{ outcome: OUTCOMES.robots, count: 41, authorized: false },
+			{ outcome: OUTCOMES.favicon, count: 18, authorized: false },
+			{ outcome: OUTCOMES.statsAuthFailed, count: 4, authorized: false },
+			{ outcome: OUTCOMES.badRequest, count: 3, authorized: true },
+		],
+
+		identity: {
+			networks: [
+				{
+					asn: '7922',
+					organization: 'Comcast Cable Communications',
+					country: 'US',
+					count: 18944,
+					lastSeen: '2026-07-31 22:04:11',
+				},
+				{
+					asn: '14618',
+					organization: 'Amazon Data Services',
+					country: 'US',
+					count: 158,
+					lastSeen: '2026-07-31 21:12:40',
+				},
+			],
+			networksError: '',
+			firmware: [
+				{
+					firmwareVersion: '1.6.2',
+					model: 'x',
+					width: '1872',
+					height: '1404',
+					count: 19044,
+					lastSeen: '2026-07-31 22:04:11',
+				},
+				{
+					firmwareVersion: '1.5.9',
+					model: 'og',
+					width: '800',
+					height: '480',
+					count: 58,
+					lastSeen: '2026-07-30 08:41:02',
+				},
+			],
+			firmwareError: '',
+			setupCalls: 3,
+			authorizedRequests: 19102,
+			expectedRequests: 8064,
+		},
+
+		panel: {
+			imageCached: [
+				{ imageCached: 'true', count: 16510, lastSeen: '2026-07-31 22:04:11' },
+				{ imageCached: 'false', count: 2592, lastSeen: '2026-07-31 21:58:02' },
+			],
+			imageCachedError: '',
+			refreshEcho: [
+				{ refreshRateEcho: '60', count: 12880, lastSeen: '2026-07-31 22:04:11' },
+				{ refreshRateEcho: '900', count: 6210, lastSeen: '2026-07-31 05:14:00' },
+				{ refreshRateEcho: '0', count: 12, lastSeen: '2026-07-29 03:22:17' },
+			],
+			refreshEchoError: '',
+		},
+
+		battery: {
+			series: [
+				{ bucket: '2026-07-28 00:00:00', voltage: 4.02, percent: 92 },
+				{ bucket: '2026-07-28 06:00:00', voltage: 3.98, percent: 88 },
+				{ bucket: '2026-07-28 12:00:00', voltage: ABSENT_NUMBER, percent: ABSENT_NUMBER },
+				{ bucket: '2026-07-28 18:00:00', voltage: 3.91, percent: 81 },
+				{ bucket: '2026-07-29 00:00:00', voltage: 3.86, percent: 74 },
+				{ bucket: '2026-07-29 06:00:00', voltage: 3.82, percent: 69 },
+			],
+			error: '',
+		},
+
+		renderOutcomes: {
+			rows: [
+				{ filenameTag: FILENAME_TAGS.departures, count: 18620, lastSeen: '2026-07-31 22:04:11' },
+				{ filenameTag: FILENAME_TAGS.upstreamFailed, count: 402, lastSeen: '2026-07-31 14:31:55' },
+				{ filenameTag: FILENAME_TAGS.noDepartures, count: 74, lastSeen: '2026-07-31 02:10:09' },
+				{ filenameTag: FILENAME_TAGS.renderFailed, count: 6, lastSeen: '2026-07-30 19:44:21' },
+			],
+			error: '',
+		},
+
+		badRequests: {
+			rows: [
+				// Downtown Seattle samples, per `CLAUDE.md`. Never the stop this sign points at.
+				{ reason: REJECTION_REASONS.invalidStopId, agency: '1', stopIds: '590,43O', count: 2, lastSeen: '2026-07-30 07:02:11' },
+				{ reason: REJECTION_REASONS.tooManyStops, agency: '40', stopIds: '621,623,1121', count: 1, lastSeen: '2026-07-29 18:20:44' },
+			],
+			error: '',
+		},
+
+		rejections: {
+			sources: [
+				{
+					country: 'NL',
+					organization: 'DigitalOcean',
+					userAgent: 'Mozilla/5.0 (compatible; CensysInspect/1.1)',
+					count: 1240,
+					lastSeen: '2026-07-31 20:59:03',
+				},
+				{
+					country: 'CN',
+					organization: 'Chinanet',
+					userAgent: injection,
+					count: 812,
+					lastSeen: '2026-07-31 19:03:47',
+				},
+			],
+			sourcesError: '',
+			probePaths: [
+				{ probePath: '/', count: 902, lastSeen: '2026-07-31 20:59:03' },
+				{ probePath: '/wp-login.php', count: 611, lastSeen: '2026-07-31 18:22:10' },
+				{ probePath: '/.env', count: 480, lastSeen: '2026-07-31 17:40:55' },
+				{ probePath: '/token/[redacted]/api/display', count: 214, lastSeen: '2026-07-31 12:08:31' },
+				{ probePath: injection, count: 9, lastSeen: '2026-07-30 22:14:06' },
+			],
+			probePathsError: '',
+		},
+
+		recent: {
+			rows: [
+				{
+					timestamp: '2026-07-31 20:59:03',
+					outcome: OUTCOMES.unshapedPath,
+					country: 'NL',
+					organization: 'DigitalOcean',
+					userAgent: 'Mozilla/5.0 (compatible; CensysInspect/1.1)',
+					probePath: '/',
+				},
+				{
+					timestamp: '2026-07-31 19:03:47',
+					outcome: OUTCOMES.badToken,
+					country: 'CN',
+					organization: 'Chinanet',
+					userAgent: injection,
+					probePath: injection,
+				},
+			],
+			error: '',
+		},
+
+		deviceLogs: {
+			levels: [
+				{ level: 'info', count: 4120, lastSeen: '2026-07-31 22:04:11' },
+				{ level: 'debug', count: 1880, lastSeen: '2026-07-31 22:04:11' },
+				{ level: 'warn', count: 96, lastSeen: '2026-07-31 18:02:40' },
+				{ level: 'error', count: 31, lastSeen: '2026-07-31 14:31:55' },
+			],
+			levelsError: '',
+			entries: [
+				logEntry( {
+					timestamp: '2026-07-31 22:04:11',
+					level: 'info',
+					message: 'image unchanged, skipping download',
+					sourcePath: 'src/bl.cpp',
+					sourceLine: 2235,
+					firmwareVersion: '1.6.2',
+					wakeReason: 'timer',
+					freeHeapSize: 4183524,
+					wifiSignal: -58,
+				} ),
+				logEntry( {
+					timestamp: '2026-07-31 18:02:40',
+					level: 'warn',
+					message: 'refresh rate read from NVS as 0, applying default',
+					sourcePath: 'src/bl.cpp',
+					sourceLine: 1719,
+					firmwareVersion: '1.6.2',
+					wakeReason: 'timer',
+					freeHeapSize: 3920104,
+					wifiSignal: -67,
+				} ),
+				logEntry( {
+					timestamp: '2026-07-31 14:31:55',
+					level: 'error',
+					message:
+						'png decode failed after 41 of 1404 lines: allocation of 15007 bytes for the line buffer ' +
+						'returned null, framebuffer left untouched and the previous image remains on the panel',
+					sourcePath: 'src/png.cpp',
+					sourceLine: 118,
+					firmwareVersion: '1.6.2',
+					wakeReason: 'timer',
+					freeHeapSize: 21440,
+					wifiSignal: -71,
+
+					// The clipped case. The kept text is shortened well below the real 1024-byte cap so the
+					// mock table stays readable — what matters here is only that the two lengths disagree.
+					messageBytes: 1420,
+				} ),
+				logEntry( {
+					timestamp: '2026-07-30 19:44:21',
+					level: 'error',
+					message: `filesystem purge removed a cached image: ${ logInjection }`,
+					sourcePath: 'lib/filesystem/filesystem.cpp',
+					sourceLine: 110,
+					firmwareVersion: '1.6.2',
+					wakeReason: 'reset',
+					freeHeapSize: 3011880,
+					wifiSignal: -74,
+				} ),
+				logEntry( {
+					timestamp: '2026-07-30 19:44:19',
+					level: 'debug',
+					message: 'wifi connected before the fuel gauge finished initialising',
+					sourcePath: 'src/displayed_image.cpp',
+					sourceLine: 9,
+					firmwareVersion: '1.6.2',
+					wakeReason: 'power on',
+
+					// A cold boot files its first entry before either reading is available, which is the case
+					// that must not print -1 on the page.
+					freeHeapSize: ABSENT_LOG_NUMBER,
+					wifiSignal: ABSENT_LOG_NUMBER,
+				} ),
+			],
+			entriesError: '',
+		},
+	};
+}

@@ -33,8 +33,8 @@ export const CONFIG_DEFAULTS = {
 	activeEnd: '22:00',
 	refreshActiveSeconds: 60,
 	refreshIdleSeconds: 900,
-	headerText: 'METRO',
 	obaBaseUrl: 'https://api.pugetsound.onebusaway.org/api/where',
+	tarpitMs: 25000,
 };
 
 /**
@@ -86,6 +86,29 @@ function minutesSinceMidnight( value, fallback ) {
 	}
 
 	return hour * 60 + minute;
+}
+
+/**
+ * How long an obviously hostile request is held before its 404.
+ *
+ * Configuration rather than a constant for two reasons beyond the project's no-literals rule. It is
+ * the one knob that trades bot cost against Worker concurrency — a held request occupies an
+ * invocation, so a large enough flood could crowd out the device's own poll, and the documented
+ * mitigation is to lower this. And it lets the tests exercise the tarpit without waiting 25 seconds.
+ *
+ * **Zero disables the delay entirely**, which is why this cannot reuse the refresh-rate coercer: that
+ * one floors at 1 because a `refresh_rate` of 0 flattens the battery, whereas 0 here is a legitimate
+ * setting. Negative and unparseable values fall back rather than being clamped, since a negative
+ * delay is a typo rather than an intent.
+ */
+function nonNegativeInteger( value, fallback ) {
+	const parsed = typeof value === 'number' ? value : Number.parseInt( String( value ?? '' ).trim(), 10 );
+
+	if ( ! Number.isFinite( parsed ) || parsed < 0 ) {
+		return fallback;
+	}
+
+	return Math.floor( parsed );
 }
 
 /** An unknown IANA zone makes every `Intl.DateTimeFormat` throw, which would be every render. */
@@ -150,8 +173,8 @@ function baseUrl( value, fallback ) {
  *   activeEndMinutes: number,
  *   refreshActiveSeconds: number,
  *   refreshIdleSeconds: number,
- *   headerText: string,
  *   obaBaseUrl: string,
+ *   tarpitMs: number,
  *   directionOverrides: Record<string, string>,
  * }}
  */
@@ -167,8 +190,8 @@ export function readConfig( env ) {
 			CONFIG_DEFAULTS.refreshActiveSeconds
 		),
 		refreshIdleSeconds: positiveInteger( source.REFRESH_IDLE_SECONDS, CONFIG_DEFAULTS.refreshIdleSeconds ),
-		headerText: trimmedString( source.HEADER_TEXT, CONFIG_DEFAULTS.headerText ),
 		obaBaseUrl: baseUrl( source.OBA_BASE_URL, CONFIG_DEFAULTS.obaBaseUrl ),
+		tarpitMs: nonNegativeInteger( source.TARPIT_MS, CONFIG_DEFAULTS.tarpitMs ),
 		directionOverrides: Object.freeze( stopLabelMap( source.DIRECTION_OVERRIDES ) ),
 	} );
 }

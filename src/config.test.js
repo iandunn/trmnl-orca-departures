@@ -13,7 +13,7 @@ describe( 'readConfig', () => {
 
 			expect( config.timezone ).toBe( CONFIG_DEFAULTS.timezone );
 			expect( config.refreshActiveSeconds ).toBe( CONFIG_DEFAULTS.refreshActiveSeconds );
-			expect( config.headerText ).toBe( CONFIG_DEFAULTS.headerText );
+			expect( config.obaBaseUrl ).toBe( CONFIG_DEFAULTS.obaBaseUrl );
 			expect( config.directionOverrides ).toEqual( {} );
 		}
 	} );
@@ -25,8 +25,8 @@ describe( 'readConfig', () => {
 			ACTIVE_END: '23:45',
 			REFRESH_ACTIVE_SECONDS: 45,
 			REFRESH_IDLE_SECONDS: 1800,
-			HEADER_TEXT: 'PIERCE',
 			OBA_BASE_URL: 'https://example.test/api/where',
+			TARPIT_MS: 4000,
 		} );
 
 		expect( config ).toEqual( {
@@ -35,10 +35,34 @@ describe( 'readConfig', () => {
 			activeEndMinutes: 23 * 60 + 45,
 			refreshActiveSeconds: 45,
 			refreshIdleSeconds: 1800,
-			headerText: 'PIERCE',
 			obaBaseUrl: 'https://example.test/api/where',
+			tarpitMs: 4000,
 			directionOverrides: {},
 		} );
+	} );
+
+	describe( 'tarpit duration', () => {
+		// Deliberately not the refresh-rate coercer: 0 is a legitimate setting here, meaning no delay,
+		// whereas a `refresh_rate` of 0 hot-loops the device until the battery is flat.
+		it( 'accepts zero as a way to disable the delay', () => {
+			expect( readConfig( { TARPIT_MS: 0 } ).tarpitMs ).toBe( 0 );
+			expect( readConfig( { TARPIT_MS: '0' } ).tarpitMs ).toBe( 0 );
+		} );
+
+		it.each( [ [ '5000', 5000 ], [ 5000, 5000 ], [ ' 5000 ', 5000 ], [ 5000.9, 5000 ] ] )(
+			'coerces %o to %i',
+			( value, expected ) => {
+				expect( readConfig( { TARPIT_MS: value } ).tarpitMs ).toBe( expected );
+			}
+		);
+
+		// A negative delay is a typo rather than an intent, so it falls back instead of clamping.
+		it.each( [ [ -1 ], [ '-500' ], [ 'soon' ], [ '' ], [ undefined ], [ null ] ] )(
+			'falls back for %o',
+			( value ) => {
+				expect( readConfig( { TARPIT_MS: value } ).tarpitMs ).toBe( CONFIG_DEFAULTS.tarpitMs );
+			}
+		);
 	} );
 
 	describe( 'refresh rates', () => {

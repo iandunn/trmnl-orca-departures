@@ -6,8 +6,12 @@
 	"type": "module",
 	"scripts": {
 		"dev": "wrangler dev --port 8788",
-		"deploy": "wrangler deploy",
-		"tail": "wrangler tail",
+		"deploy": "set -a && . ./.cloudflare.env && set +a && wrangler deploy",
+		"deploy:check": "wrangler deploy --dry-run",
+		"tail": "set -a && . ./.cloudflare.env && set +a && wrangler tail",
+		"whoami": "set -a && . ./.cloudflare.env && set +a && wrangler whoami",
+		"secret": "set -a && . ./.cloudflare.env && set +a && wrangler secret put",
+		"secret:list": "set -a && . ./.cloudflare.env && set +a && wrangler secret list",
 		"test": "vitest run",
 		"test:watch": "vitest",
 		"lint": "eslint ."

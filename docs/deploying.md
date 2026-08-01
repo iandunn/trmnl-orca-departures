@@ -34,17 +34,38 @@ nvm use && npm install
 cp .dev.vars.example .dev.vars     # fill in your stop, token and API key
 ```
 
-Pick a Worker name in `wrangler.toml` — it becomes your public `*.workers.dev` subdomain, so it must be globally unique. Generate a device token with `openssl rand -hex 32`. Then set the secrets and deploy, **in that order**:
+Pick a Worker name in `wrangler.toml` — it becomes your public `*.workers.dev` subdomain, so it must be globally unique. Generate a device token with `openssl rand -hex 32`.
+
+**Enable Analytics Engine once, before the first deploy.** It backs the `/stats` page, and it is off by default on a new account: `wrangler deploy` fails with "You need to enable Analytics Engine" (error code `10089`) until you turn it on at dash.cloudflare.com under Workers, Analytics Engine. It is free on the Workers Free plan.
+
+Then set the secrets and deploy, **in that order**:
 
 ```bash
 npx wrangler secret put DEVICE_TOKEN
 npx wrangler secret put OBA_API_KEY
-npx wrangler deploy
+npx wrangler secret put STATS_PASSWORD
+npx wrangler secret put ANALYTICS_API_TOKEN
+npx wrangler secret put CLOUDFLARE_ACCOUNT_ID
+npm run deploy
 ```
 
 Order matters. A deployed Worker where `env.DEVICE_TOKEN` is `undefined` makes the token comparison degenerate, which leaves the endpoint open to anyone who finds the URL and burns your OneBusAway quota.
 
-The Cloudflare API token wrangler uses needs `Workers Scripts: Edit`; a read-only token fails with `Authentication error [code: 10000]`. Wrangler owns the Worker — do not paste code into the Cloudflare dashboard, since a deploy overwrites it.
+The last three are only needed for `/stats`. Skip them and the sign works normally; the page just explains what is missing.
+
+**There are two different Cloudflare API tokens here, and Cloudflare's UI calls both the same thing.** Crossing them is the easiest mistake on this page:
+
+| Value | Who reads it | Where it lives | Scope |
+| --- | --- | --- | --- |
+| `CLOUDFLARE_API_TOKEN` | the wrangler CLI, at deploy time | `.cloudflare.env` | `Workers Scripts: Edit` |
+| `ANALYTICS_API_TOKEN` | the Worker, on every `/stats` load | `wrangler secret put` | `Account Analytics: Read` |
+| `CLOUDFLARE_ACCOUNT_ID` | the Worker, to build the SQL URL | `wrangler secret put` | not a credential |
+
+A read-only deploy token fails with `Authentication error [code: 10000]`. Wrangler owns the Worker — never paste code into the Cloudflare dashboard, since a deploy overwrites it.
+
+`CLOUDFLARE_ACCOUNT_ID` must name **the account the Worker is actually deployed to**. If it names a different one, `/stats` queries an account the data was never written to and renders an empty page that looks perfectly healthy. It is held as a secret only for portability — it is not sensitive, but `wrangler.toml` is committed and a fork needs its own value.
+
+`npm run deploy` and `npm run tail` load `.cloudflare.env` themselves. **Do not run `source .cloudflare.env && npx wrangler deploy`** — `source` sets shell variables, not environment variables, so wrangler never receives the token and silently falls back to whatever account `wrangler login` last stored. That deploys to the wrong account with no error at all.
 
 Once it is deployed, `npm run tail` streams the Worker's logs live, including the diagnostics the device POSTs to `/api/log`. That is the only channel back from a sign that is rendering nothing, so it is the first place to look. See [development.md](development.md#reading-the-devices-logs).
 
@@ -68,11 +89,11 @@ Everything the device fetches lives under that prefix, images included: the firm
 
 | Kind | Home |
 | --- | --- |
-| Secrets — `DEVICE_TOKEN`, `OBA_API_KEY` | `npx wrangler secret put`, or `.dev.vars` locally |
+| Secrets — `DEVICE_TOKEN`, `OBA_API_KEY`, `STATS_PASSWORD`, `ANALYTICS_API_TOKEN` | `npx wrangler secret put`, or `.dev.vars` locally |
 | Privacy-sensitive — agency, stop IDs | A path segment of the device's base URL |
-| Everything else — schedule, timezone, labels | `[vars]` in `wrangler.toml` |
+| Everything else — schedule, timezone, labels, `CLOUDFLARE_ACCOUNT_ID` | `[vars]` in `wrangler.toml` |
 
-The `[vars]` block holds the timezone, the active window, both refresh rates, the header text and the OneBusAway base URL. It is committed, so a fork edits one file and redeploys. Nothing deployment-specific is a literal in the code; `readConfig()` in `src/config.js` is the only reader, and it coerces and range-checks every value, falling back to a default rather than throwing — `/api/display` runs about 1440 times a day, and a config error there is a flat battery rather than a 500 someone notices.
+The `[vars]` block holds the timezone, the active window, both refresh rates, the bot-tarpit duration and the OneBusAway base URL. It is committed, so a fork edits one file and redeploys. Nothing deployment-specific is a literal in the code; `readConfig()` in `src/config.js` is the only reader, and it coerces and range-checks every value, falling back to a default rather than throwing — `/api/display` runs about 1440 times a day, and a config error there is a flat battery rather than a 500 someone notices.
 
 ### Direction labels, and overriding them per stop
 
@@ -89,3 +110,26 @@ Most stops need no entry. Keep it to the handful where the bearing misleads; a r
 This is the one display value that cannot live in `wrangler.toml`, because it is keyed by stop ID and your entry would put your stop — and so roughly your address — in a committed file. It goes in `.dev.vars` locally and `npx wrangler secret put DIRECTION_OVERRIDES` in production. Not because it is a credential, but because that is the only home for a value that is neither secret nor publishable.
 
 The sample boards do **not** read it; see [development.md](development.md#design-preview).
+
+## Monitoring the sign
+
+`https://<your-worker>.workers.dev/stats` is a single page showing what is working and what is not. It prompts for a password over HTTP Basic — the username is ignored, only `STATS_PASSWORD` matters.
+
+It answers four questions, in the order they matter:
+
+**Is anyone else using my URL?** The Device identity panel at the top is an alarm, not a table. Normally it is one calm line: one network, one firmware version, no enrollments. Because the shared token travels in a URL, a leak — a screenshot, a debugging paste, a request log — lets someone else authenticate successfully, and a change of network is the only signal that would ever exist. Two networks, an unexpected `/api/setup` call, or a second firmware version all mean something is wrong.
+
+**Is the panel actually repainting?** The `Image-Cached` figure is the device reporting whether it skipped the download because `filename` was unchanged. That is the flicker rate, and the whole design bets on it — flicker avoidance comes entirely from that cache no-op, not from partial refresh. The header reports the *previous* wake, not the current one.
+
+**How is the battery holding up?** All six battery headers are recorded, and every one reads `-1` when the fuel gauge failed to initialise, which the page shows as no data rather than plotting a false zero.
+
+**Is something misconfigured?** A valid token with an unusable stop ID lands in the Configuration errors panel with the reason and the stop, which is the fastest way to catch a typo made at the captive portal.
+
+**What did the device itself say?** The Device logs panel keeps everything the sign POSTs to `/api/log`, including the `source_path` and `source_line` that name the exact line of firmware that failed, and the free-heap figure that catches the out-of-memory path — one of the modes that draws nothing at all, forever. `npm run tail` shows the same entries live, which is what you want while standing at the sign; this panel is what you want on Thursday when you are asking what happened on Tuesday.
+
+Two things worth knowing about the data:
+
+- **It records stop IDs in full, deliberately**, because "which stop was this failing request for" is the question the page exists to answer. The stop never enters the repository, but it *is* printed on this page — so a screenshot of `/stats` carries roughly your address. Treat it like the URL itself.
+- **The device token is never recorded**, only a short hash of it, which is enough to tell forty attempts at one wrong token from forty different guesses.
+
+Wrong password attempts are tarpitted for 25 seconds and recorded as `stats-auth-failed`, so they show up on the page they were trying to reach.

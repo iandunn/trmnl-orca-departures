@@ -16,13 +16,22 @@ Plain JavaScript, no framework, no bundler. One Worker, vitest, eslint flat conf
 
 Local values go in `.dev.vars` — copy `.dev.vars.example`, which documents each one. That file is gitignored and `wrangler deploy` never uploads it.
 
+**Nothing above needs Cloudflare credentials**, and that is deliberate. `npm run dev`, `npm test`, `npm run lint` and `npm run deploy:check` all work on a fresh clone with no `.cloudflare.env` at all — `wrangler dev` runs unauthenticated in local mode and `--dry-run` never calls the API.
+
+Every script that *does* touch the account — `deploy`, `tail`, `whoami`, `secret`, `secret:list` — loads `.cloudflare.env` itself. **Never run a bare `wrangler` command that writes**, and never `wrangler login`: ambient OAuth credentials are silently preferred over the ones in that file, and on a machine with more than one Cloudflare account that can deploy somewhere unintended while printing a perfectly normal success message.
+
+So the split is by whether a command reaches the account, not by tidiness. `npm run secret:list` is the check that proves credentials resolve correctly; `npm run whoami` does **not**, because it only lists the accounts a token can reach and passes even when an operation would target a different one.
+
 Every BYOS endpoint currently answers **404 on purpose**, so `npm run dev` returning 404 on `/api/display` is correct rather than broken. A partial `/api/display` is worse than none: a response missing `refresh_rate` parses as `0` and hot-loops the device until the battery is flat, and a body of `{"status": 500}` factory-resets it. The endpoint only becomes safe once `refresh_rate`, `filename` and `status: 0` are all correct together.
 
 ## What lives where
 
 | | |
 | --- | --- |
-| `src/worker.js` | Entry point. Routes the dev preview and otherwise 404s. |
+| `src/worker.js` | Entry point, and deliberately nothing but the seam between the gate and the BYOS handlers. |
+| `src/gate.js` | The shell every request passes through. Returns a finished response, or an authorized classification to dispatch on. |
+| `src/abuse.js` | Request classification, the bot tarpit, and the outcome vocabulary. |
+| `src/stats/` | The `/stats` page: `schema.js` (the Analytics Engine row), `analytics.js` (writes), `device-logs.js` (`/api/log` history), `query.js` (SQL reads), `render.js` (pure HTML), `handler.js` (auth). |
 | `src/config.js` | `readConfig()` — the only reader of `env` for a display or scheduling value. |
 | `src/clock.js` | `formatBoardTime()` — the header fields and the "as of" stamp, in the configured timezone. |
 | `src/routing.js` | Path parsing and the constant-time token comparison. |
@@ -49,19 +58,31 @@ Boards render at a fixed reference instant so the departure times stay consisten
 
 **Look at the image, not just the status code.** A textless render is a valid PNG of a plausible size, and a font that fails to load produces exactly that. More than one afternoon has gone to a 200 that drew nothing.
 
+## Stats page preview
+
+The same flag serves the stats page against mock data at **http://localhost:8788/_preview/stats**, through the identical `renderStatsHtml()` the real route uses. That matters because the page's most important states are the ones you cannot conveniently produce on demand — a second network appearing, a fuel gauge returning `-1`, one panel's query failing while the rest of the page survives. `buildMockStatsData()` in `src/stats/render.js` fabricates them, including an HTML-injection payload so the escaping stays exercised.
+
+**Escaping is not optional in that file.** It renders user agents and probe paths straight from whoever sent them. `src/dev/preview.js` builds its HTML without escaping because its inputs are fixtures; the stats page cannot follow that precedent, and `render.test.js` asserts it does not.
+
 ## Reading the device's logs
 
 The device POSTs its own diagnostics to `/api/log`, and that is the **only** channel back from it — there is no push channel, so a device that renders nothing cannot be prodded, and the firmware tracks no staleness of any kind. Three of its failure paths (malformed body, wrong `Content-Type`, out of memory) draw nothing at all and then settle into 900-second polls, so a blank panel may be the only symptom you ever see.
 
-Those payloads are logged with `console.log`, which is enough for both live and recent-history views. No database, no UI:
+Those payloads are kept **two** ways, deliberately, because they answer different questions:
 
 ```bash
 npm run tail          # live stream from the deployed Worker
 ```
 
-`wrangler tail` is live-only — it shows requests as they happen and nothing from before you attached. For anything older, the Cloudflare dashboard's **Workers Logs** view is queryable and searchable, because `[observability.logs]` is enabled in `wrangler.toml`.
+`wrangler tail` is live-only — it shows requests as they happen and nothing from before you attached. That is the right tool when you are standing at the sign with a USB cable. The Cloudflare dashboard's **Workers Logs** view covers the recent past, because `[observability.logs]` is enabled in `wrangler.toml`, but retention there is **3 days on the Free plan** (7 on Paid).
 
-**Retention on the Free plan is 3 days**, with 200,000 logs a day included (Paid is 7 days). That is accepted: a device failing overnight is still readable the next morning, which is the case that matters. Durable storage is deliberately not built — see `docs/TODO.md` if 3 days ever proves too short.
+For history, `recordDeviceLogs()` in `src/stats/device-logs.js` writes every entry to its own Analytics Engine dataset, and the **Device logs** panel on `/stats` reads it back with roughly 90 days of retention. Three reasons that is not redundant with the console:
+
+- The entries that matter arrive **during a failure**, which is exactly when nobody is watching a tail.
+- It sits in the same store as the request outcomes, so the device's own account of a failure can be read against what the server was answering at the time. Workers Logs cannot be joined against that.
+- 3 days is thinner than it sounds for a wall-mounted object. A sign that misbehaves while you are away is a week gone.
+
+The dataset keeps `source_path` and `source_line` — together they name the exact line of the GPLv3 firmware that produced the entry, rather than a guess — plus `free_heap_size` and `max_alloc_size`, which are the only signal for the out-of-memory path. One request is capped at 64 persisted entries so a misbehaving device cannot spend the daily write quota; anything dropped is counted rather than discarded silently.
 
 Both `npm run tail` and `npm run deploy` need Cloudflare credentials in the environment, which is still an open question — `.cloudflare.env` holds them and nothing loads it yet.
 

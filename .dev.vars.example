@@ -69,3 +69,44 @@ OBA_API_KEY=
 # The sample boards have their own overrides in `src/dev/sample-boards.js` — those stops are
 # public downtown ones chosen precisely so they can be written down.
 DIRECTION_OVERRIDES=
+
+# Password for the `/stats` page, prompted for over HTTP Basic. The username is ignored.
+#
+# This is the only brute-forceable secret in the project — DEVICE_TOKEN is 32 random bytes, while
+# this is something a person types. A wrong password is therefore tarpitted for 25 seconds and
+# recorded as `stats-auth-failed`, so guessing attempts are both slow and visible on the page
+# itself. Generate something long: `openssl rand -base64 24`.
+#
+# An unset value never authenticates — the comparison refuses empty strings rather than degenerating
+# into an open page. So leaving this blank locks the page rather than unlocking it.
+STATS_PASSWORD=
+
+# Which Cloudflare account holds the stats, needed to build the SQL API URL that reads them back.
+#
+# Not a credential — it appears in every dashboard URL — but it is kept out of `wrangler.toml`
+# because that file is committed and this repo is public, and a fork needs its own value anyway.
+# Set it in production with `npm run secret -- CLOUDFLARE_ACCOUNT_ID`.
+#
+# **This must be the account the Worker is deployed to.** If it names a different one, `/stats` reads
+# an account the data was never written to and shows nothing while looking perfectly healthy.
+#
+# It also has to appear a second time, in `.cloudflare.env`, and that is not redundancy: this copy is
+# a Worker binding read by our code, while that one tells the wrangler CLI which account to act on.
+# Neither is in git. Omitting the `.cloudflare.env` copy is how a deploy silently lands on whichever
+# account `wrangler login` last cached.
+CLOUDFLARE_ACCOUNT_ID=
+
+# Cloudflare API token used to READ the stats back, scoped to Account Analytics: Read and nothing
+# else. Create it at dash.cloudflare.com under My Profile, API Tokens.
+#
+# **Separate from the `CLOUDFLARE_API_TOKEN` in `.cloudflare.env`**, which is wrangler's own deploy
+# credential and needs `Workers Scripts: Edit`. Two different tokens, same generic name in the
+# Cloudflare UI — the easiest mix-up here.
+#
+# Needed because Analytics Engine is written through a Worker binding but read through Cloudflare's
+# SQL HTTP API, which takes a bearer token. That API also sends no CORS headers, which is why the
+# Worker queries it server-side instead of the page fetching it directly.
+#
+# Not required for anything the device does. Without it the sign works normally and only `/stats`
+# shows an explanatory banner.
+ANALYTICS_API_TOKEN=

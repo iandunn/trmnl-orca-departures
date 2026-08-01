@@ -3,6 +3,11 @@ main = "src/worker.js"
 compatibility_date = "2026-06-07"
 preview_urls = true
 
+# The `*.workers.dev` subdomain is the sign's only address — the device has no other way to reach us,
+# and its captive-portal URL is built from it. Stated explicitly rather than left to the default,
+# which is the same value but warns on every deploy that it is being assumed.
+workers_dev = true
+
 [observability.logs]
 enabled = true
 
@@ -34,11 +39,72 @@ ACTIVE_END = "22:00"
 REFRESH_ACTIVE_SECONDS = 60
 REFRESH_IDLE_SECONDS = 900
 
-# Agency branding in the header bar. "METRO" is King County Metro's; another agency needs its own.
-HEADER_TEXT = "METRO"
-
 # The regional OneBusAway deployment. Only Puget Sound has been tested.
 OBA_BASE_URL = "https://api.pugetsound.onebusaway.org/api/where"
+
+# How long an obviously hostile request is held before its 404, in milliseconds. Applied only to
+# requests whose path is not even shaped like this sign's URL — a scanner — and to a wrong `/stats`
+# password. **Never to a well-shaped path with a bad token**, which is the pairing typo: the device's
+# read timeout is 15 s and its first three failed polls draw nothing at all, so delaying that case
+# turns one mistyped character into a sign that does nothing for seven minutes with no clue why.
+#
+# The tradeoff is concurrency — a held request occupies a Worker invocation, so a large enough flood
+# could crowd out the device's own poll. Lower this if that ever happens; 0 disables the delay.
+TARPIT_MS = 25000
+
+# `CLOUDFLARE_ACCOUNT_ID` is deliberately NOT here, even though it is not a credential.
+#
+# The stats page needs it to READ its own data: Analytics Engine is written through the binding below
+# but read through Cloudflare's SQL HTTP API, which takes the account ID in its URL — there is no
+# `env.ANALYTICS.query()`. So the Worker does need it at runtime.
+#
+# It goes with the secrets anyway, because this block is committed and the repo is public. An account
+# ID is not a password, but it identifies whose account this is to anyone reading the repo, and a
+# fork needs its own value regardless — so committing one helps nobody and costs a little privacy.
+# This is the same fourth category `DIRECTION_OVERRIDES` falls into: not secret, not publishable.
+#
+#   npx wrangler secret put CLOUDFLARE_ACCOUNT_ID
+#
+# Until it is set, `/stats` renders an explanatory banner rather than failing. Nothing the device
+# does depends on it.
+
+# Must match the `dataset` of the matching binding below. Read through vars rather than hardcoded so
+# the queries and the bindings cannot drift apart silently.
+ANALYTICS_DATASET = "trmnl_orca_departures_requests"
+DEVICE_LOGS_DATASET = "trmnl_orca_departures_device_logs"
+
+# Request outcomes, for the `/stats` page. Analytics Engine rather than KV, and the reason is worth
+# keeping written down: KV's free write quota is 1000 a day and this sign alone polls roughly 1440
+# times a day, so per-request bookkeeping in KV would exhaust the quota on entirely legitimate
+# traffic before an attacker existed. Analytics Engine is free at 100k writes and 10k read queries a
+# day, and does not touch the KV quota.
+#
+# Expected volume here is roughly 3-5k data points a day against that 100k limit. There is no quota
+# question to answer — stated so nobody re-derives one from a published figure, which has cost this
+# project two sessions already.
+#
+# **Analytics Engine needs one-time enablement in the dashboard** before `wrangler deploy` will
+# accept these. Without it the deploy fails with "You need to enable Analytics Engine", error code
+# 10089. Enable it at dash.cloudflare.com under Workers, Analytics Engine.
+[[analytics_engine_datasets]]
+binding = "ANALYTICS"
+dataset = "trmnl_orca_departures_requests"
+
+# `/api/log`, the device's own diagnostic channel — the only window into a sign that is rendering
+# nothing. Written by `recordDeviceLogs()` in `src/stats/device-logs.js` and read back by the Device
+# logs panel on `/stats`.
+#
+# **This is history, and `console.log` is not a substitute for it.** A live `wrangler tail` only shows
+# what happens while someone is watching, and the entries that matter arrive during a failure, which
+# is exactly when nobody is. `[observability.logs]` above does retain console output for a few days,
+# but in a separate store with a much shorter window that cannot be queried alongside the request
+# rows explaining what the device was reacting to. Both are kept, for different jobs.
+#
+# Kept separate from the requests dataset rather than shared, so high-volume firmware chatter cannot
+# dilute the sampling of request outcomes, and so the two can be queried and aged independently.
+[[analytics_engine_datasets]]
+binding = "DEVICE_LOGS"
+dataset = "trmnl_orca_departures_device_logs"
 
 # Required for the bundled font, or the static import fails.
 #

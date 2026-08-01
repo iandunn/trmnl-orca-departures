@@ -21,12 +21,33 @@ Docs are split by audience: `README.md` is the overview and links out, `docs/how
 Built 2026-08-01. `readConfig()` in `src/config.js` is the only place that reads a display or scheduling value off `env`; `formatBoardTime()` in `src/clock.js` turns a timestamp into the header fields and the "as of" stamp. What the next piece needs to know:
 
 - Everything coerces and falls back rather than throwing, deliberately: the same var arrives as a **number** from `[vars]` and as a **string** from `.dev.vars` or a secret, and `/api/display` must never fail over a config value. Refresh rates below 1 second are refused, since 0 hot-loops the device flat.
-- `activeStartMinutes`/`activeEndMinutes` and `headerText` are exposed but **unconsumed** — the scheduler is their first reader, and `HEADER_TEXT` does not map cleanly onto the board yet (bus draws the Metro logo image; only rail's `textLockup` reads `board.agency`).
+- `activeStartMinutes`/`activeEndMinutes` are exposed but **unconsumed** — the scheduler is their first reader. `HEADER_TEXT` was deleted 2026-08-01 rather than wired up: both modes draw a logo rather than a word, so it was config for a case that never arises, and a different agency needs its own logo asset that no string could supply.
 - Secrets are deliberately **not** in the config object, so no future log line can serialise one. `directionOverrides` is in it and is privacy-sensitive — never log the object.
 - **`formatBoardTime()` throws on a non-finite timestamp, on purpose, and nothing catches it yet.** This is the one place the never-fail rule and a deliberate throw collide: `/api/display` must catch it and fall back to the render-failed screen rather than let a missing OneBusAway `currentTime` take down the endpoint. Silently formatting a bad timestamp would stamp the board 1969, which is worse.
 - The preview renders at a fixed reference instant by default so the header stays consistent with the fixture rows; `?now=live` renders at the real clock.
 - Verified against ICU rather than assumed: legacy zone aliases (`US/Pacific`, `PST`) resolve to the full zone and stay DST-aware, so the timezone guard only has to catch what actually throws. Separately, ICU separates the day period with U+202F, which Fira Sans need not carry — every string is assembled from `formatToParts()` with ASCII spaces for that reason.
 - **Row count is deliberately not configuration** — it follows from the layout constants in `render/board.js`, not from a deployment. Neither is the staleness threshold, which was withdrawn as a requirement when the as-of stamp became the mechanism.
+
+### What the request gate and stats page already guarantee
+
+Built 2026-08-01. `src/gate.js` is the shell every request passes through; `src/abuse.js` classifies, `src/stats/` records and displays. What the next piece needs to know:
+
+- **`gate()` returns either a finished `Response` or an authorized classification.** The BYOS handlers hang off the second case and should not need to touch `src/gate.js` or `src/abuse.js` at all. `src/worker.js` is deliberately just that seam — replace its final branch, which today records the outcome and 404s.
+- **`recordOutcome()` must be called exactly once per authorized request.** Authenticated requests are deliberately *not* logged by the gate, because the interesting outcome is not knowable there — which board state was served, whether OneBusAway answered. Logging a placeholder in the gate plus a real row in the handler would double-count every request the sign ever makes. Add the new outcome names to `OUTCOMES` in `src/abuse.js` and pass them, along with `filenameTag`.
+- **Every telemetry header is already captured**, so the handlers do not need to log them again: `Model`, `FW-Version`, `Image-Cached`, `Update-Source`, `Wake-Time`, `Refresh-Rate`, `RSSI`, `Width`/`Height` and all seven battery fields.
+- **`/api/log` must call `recordDeviceLogs( env, logs, { agency, stopIds } )`** from `src/stats/device-logs.js`. It maps the documented snake_case payload onto the `DEVICE_LOGS` dataset, caps one request at 64 entries so a device cannot spend the daily write quota, never throws, and returns how many it persisted. The panel that reads them back is already on `/stats`.
+  A `console.log` of the same entries is complementary and worth keeping — that is the live `wrangler tail` view. It is **not** a substitute for the dataset: `[observability.logs]` retains console output for a few days in a separate store that cannot be queried alongside the request rows explaining what the device was reacting to, and the entries that matter arrive during a failure, which is exactly when nobody is watching a tail.
+- **Analytics Engine columns are positional and permanent.** `BLOB_FIELDS` and `DOUBLE_FIELDS` in `src/stats/schema.js` are the schema. **Append only** — inserting a field mid-list silently reinterprets every historical row, with no migration and no way to notice afterwards except that the numbers look wrong.
+- **The token is never recorded, only a 4-byte fingerprint.** Raw paths are never recorded either, except for unauthenticated requests, which go through `safeProbePath()` — an allow-list that keeps `/wp-login.php` and replaces anything long or high-entropy with `[redacted]`, because a URL one character away from ours would otherwise write the live shared secret into the dataset.
+- **Stop IDs are recorded raw, by decision, and are printed on `/stats`.** The stop still never enters git, but a screenshot of that page carries roughly a home address. The page says so on itself.
+- **The tarpit is keyed on path shape, never on token validity.** A 25-second delay exceeds the device's 15-second read timeout, and the first three failed polls draw nothing at all — so tarpitting a well-shaped path would make a token typo at the captive portal into a sign that does nothing for seven minutes with no clue why. `src/abuse.test.js` asserts `tarpit: false` for `bad-token` specifically; that assertion is the regression guard for the whole design.
+
+### Still to do on top of the gate
+
+- **Serve the error board for an authorized request with an unusable stop.** This is the "maximally helpful once authenticated" half, and it is classified but not yet served: `classification.reason` already carries a `REJECTION_REASONS` value, and today `src/worker.js` 404s it like any other rejection. It needs a new `FILENAME_TAGS` entry — seven lowercase alphanumeric characters, distinct from every good render so the device's cache cannot suppress it — a board that reads as broken from across the room, and `/api/display` returning it with `status: 0` and a valid `refresh_rate`. An HTTP error cannot substitute: the firmware reads `status` from the JSON body and a bare 404 is inert by design.
+- **Validate the `Access-Token` header as a second factor.** The gate authenticates on the URL token only. `/api/setup` is meant to issue an `api_key` that the device then sends back on every `/api/display` call, and nothing checks it yet — so a leaked URL is currently sufficient on its own. Needs somewhere to store the issued key, which is the same storage decision as the recovery generation below.
+- **Fill in `CLOUDFLARE_ACCOUNT_ID`** in `wrangler.toml`, and **enable Analytics Engine in the dashboard** before the first deploy or it fails with error `10089`. Both are one-time human steps; the value is in `.cloudflare.env`.
+- **Watch the tarpit's effect on concurrency once there is real traffic.** A held request occupies a Worker invocation for 25 seconds. Wall time is not billed CPU so it costs nothing against that budget, but a large enough flood could crowd out the device's own poll. If the sign ever fails during an observable scan, lower `TARPIT_MS` or drop the tarpit — nothing depends on it.
 
 ### The next two pieces, in order
 
@@ -70,8 +91,10 @@ Try to do as many of these as possible. Don't do one if it'd overlap code with a
 
 ## High Priority
 
-- [ ] Once this is ready for initial testing, look for any perf optimizations to improve the flicker time or reduce worker load or things of that nature. aslso cruft removal from source code
-- [ ] Once this is ready for initial testing, run a `/security-review`
+- [ ] Once this is ready for initial testing
+	- [ ] compare to the template repo to see if anything should be added/changed or any features would make sense to add etc
+	- [ ] look for any perf optimizations to improve the flicker time or reduce worker load or things of that nature. aslso cruft removal from source code
+	- [ ] Once this is ready for initial testing, run a `/security-review`
 
 - [ ] flush wall mount options according to claude - not reviewed
 	- French cleat, VHB'd to the back. A 3–5mm aluminum or printed cleat bonded with 3M VHB 4941, mating to a cleat screwed into the wall. Zero holes in the device, sits nearly flush, holds far more than 450g, and lifts straight up and off for charging. This is what I'd do.

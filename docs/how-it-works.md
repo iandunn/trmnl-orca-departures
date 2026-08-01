@@ -1,6 +1,6 @@
 # How it works
 
-TRMNL devices normally talk to TRMNL's own servers. This project uses **BYOS** (Bring Your Own Server) instead: the device is pointed at a Worker that implements the three endpoints its firmware expects.
+TRMNL devices normally talk to TRMNL's own servers. This project uses **BYOS** (Bring Your Own Server) instead: the device is pointed at a CloudFlare Worker that implements the three endpoints TRMNL's firmware expects.
 
 **There is no plugin here, and that is not an omission.** A TRMNL can get its image one of two ways, and they are mutually exclusive:
 
@@ -18,3 +18,17 @@ BYOS was chosen because the hosted path cannot express the things this sign depe
 The image is a content hash away from freezing: the device caches by the `filename` field and skips the repaint entirely when it is unchanged. That is a feature — an unchanged render costs zero flicker — but it means an error screen must carry a filename distinct from the last good render, or it will never be shown.
 
 Because e-paper holds its last image indefinitely with no power and no server, every render carries a visible "as of" timestamp. A sign that cannot reach the server keeps showing yesterday's departures otherwise, and no amount of server-side code can fix that from the other side of an outage.
+
+## Getting in, and staying out
+
+`/api/setup` is unauthenticated by design — that is how a device enrolls — so a shared secret rides in the URL path instead, and the stop rides with it. That keeps both out of this repository entirely: they live only in the device's own memory.
+
+Because the URL is the credential, the Worker treats path shape as the dividing line. Anything that is not even shaped like the sign's URL is a scanner, and gets held for 25 seconds before its 404. Anything well-shaped but wrong is answered immediately — that case is a typo made while pairing, and a device that hangs for 25 seconds looks identical to a server that is down.
+
+Past the token check the posture inverts: a caller holding the secret is the owner, so a bad stop ID gets told what is wrong rather than a blank 404.
+
+## Knowing whether it works
+
+An e-paper sign fails quietly. It holds its last image with no power and no network, so "working" and "frozen three days ago" look the same from across the room.
+
+Two things address that, and they are different in kind. The **"as of" timestamp** is rendered into the image, so it survives the server being unreachable — it is the only defense that works when the thing that failed is the server itself. The **`/stats` page** covers everything the server *can* see: whether the panel is actually repainting, how the battery is holding up, whether a stop is misconfigured, and whether anyone other than the owner has been using the URL. See [deploying.md](deploying.md#monitoring-the-sign).

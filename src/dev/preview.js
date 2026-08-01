@@ -11,6 +11,7 @@
 
 import { readConfig } from '../config.js';
 import { renderBoard } from '../render/index.js';
+import { buildMockStatsData, renderStatsHtml } from '../stats/render.js';
 import { sampleBoards } from './sample-boards.js';
 
 const PREVIEW_PREFIX = '/_preview';
@@ -77,7 +78,8 @@ function contactSheet( boards, nowParam ) {
 		`img{display:block;width:100%;max-width:var(--w);background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.5)}` +
 		`</style>` +
 		`<h1>1872 &times; 1404 &middot; 4-bit greyscale &middot; shown at 50% &middot; reload to re-render</h1>` +
-		`<nav>${ nav }<a href="${ PREVIEW_PREFIX }?now=live">render at the real clock</a></nav>${ cards }`
+		`<nav>${ nav }<a href="${ PREVIEW_PREFIX }?now=live">render at the real clock</a>` +
+		`<a href="${ PREVIEW_PREFIX }/stats">stats page (mock data)</a></nav>${ cards }`
 	);
 }
 
@@ -92,6 +94,15 @@ export async function handlePreview( request, env ) {
 
 	const url = new URL( request.url );
 	const { pathname } = url;
+
+	// The stats page against mock data, so its layout can be iterated without an Analytics Engine
+	// dataset, a deploy, or waiting for the sign to generate interesting failures. It renders through
+	// exactly the function the real route uses, so what is seen here is what ships.
+	if ( pathname === `${ PREVIEW_PREFIX }/stats` ) {
+		return new Response( renderStatsHtml( buildMockStatsData( url.searchParams.get( 'range' ) ) ), {
+			headers: { 'Content-Type': 'text/html; charset=utf-8' },
+		} );
+	}
 
 	// The timezone comes from real config, so the header block and the "as of" stamp are produced by
 	// the same path the device will get rather than by a fixture string.

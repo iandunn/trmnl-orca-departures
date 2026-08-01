@@ -42,13 +42,17 @@ Every 8th render additionally gets the slow deep clear rather than the fast one 
 - `src/config.js` — `readConfig()`, the only reader of `env` for a display or scheduling value. Coerces and range-checks everything and never throws; secrets stay off it on purpose. Added 2026-08-01.
 - `src/clock.js` — `formatBoardTime( timestampMs, timezone )`, the header fields and the "as of" stamp. Pure, and takes the timestamp rather than reading a clock, because the stamp must come from OneBusAway's `currentTime`. Added 2026-08-01.
 - `src/filename.js`, `src/routing.js` — the cache key and path parsing, as before.
+- `src/gate.js` — the shell every request passes through. Returns either a finished `Response` or an authorized classification for a caller to dispatch on, which is the seam the BYOS handlers hang off. Added 2026-08-01.
+- `src/abuse.js` — `classifyRequest()`, `diagnosePath()`, the tarpit, and the `OUTCOMES` / `REJECTION_REASONS` vocabularies. Added 2026-08-01.
+- `src/stats/` — `schema.js` (the positional Analytics Engine row, plus `safeProbePath()`), `analytics.js` (the write path), `query.js` (the SQL reads), `render.js` (pure HTML), `handler.js` (Basic auth). Added 2026-08-01.
 
-**198 tests, lint clean.** `vitest.config.js` aliases `.wasm` and `.ttf` to a stub so modules that transitively import the renderer can still be unit tested; nothing depending on those contents is asserted.
+**`vitest.config.js` aliases `.wasm` and `.ttf` to a stub** so modules that transitively import the renderer can still be unit tested; nothing depending on those contents is asserted.
 
-**`src/worker.js` still 404s every BYOS endpoint.** The renderer being present does not change that — `/api/setup`, `/api/display` and `/api/log` only become safe implemented together.
+**`src/worker.js` still 404s every BYOS endpoint.** Neither the renderer nor the gate changes that — `/api/setup`, `/api/display` and `/api/log` only become safe implemented together. `src/worker.js` is now deliberately just the seam: its final branch records the outcome and 404s, and that branch is what the handlers replace.
 
 - **Settled design decisions** are written up in the sections below: the Metro-faithful layout, the real-time vs scheduled treatment, Fira Sans, two-stop grouping, light-rail circle badges, the OneBusAway footer mark, and the sample stops.
-- **The config surface is done** (2026-08-01). `activeStartMinutes`/`activeEndMinutes` and `headerText` are read but have no consumer yet — the scheduler is their first one.
+- **The config surface is done** (2026-08-01). `activeStartMinutes`/`activeEndMinutes` are read but have no consumer yet — the scheduler is their first one. `HEADER_TEXT` was removed rather than wired up; see the configuration section.
+- **The request gate and the stats page are done** (2026-08-01). Two things are classified but not yet served: an authorized request with an unusable stop still 404s rather than rendering an error board, and the `Access-Token` header is not validated as a second factor. See `docs/TODO.md`.
 - **Next, in order:** the three BYOS endpoints together, then wiring live OneBusAway data into the board. See `docs/TODO.md`.
 
 **A block comment containing a glob will silently break the build.** `**` followed by `/*` closes the comment early and the rest of the file parses as garbage. Write "a wasm glob" in prose instead.
@@ -57,7 +61,7 @@ The scaffolding notes below remain accurate.
 
 - `package.json`, `wrangler.toml`, `.nvmrc`, `eslint.config.js`, `src/worker.js`, `src/worker.test.js` exist. `npm test`, `npm run lint`, `wrangler deploy --dry-run` and `wrangler dev` were all confirmed working against this exact config.
 - **Every BYOS endpoint still 404s, deliberately.** `npm run dev` returning 404 on `/api/display` is correct, not broken. A partial `/api/display` that omits `refresh_rate` flat-batteries the device, and a body of `{"status": 500}` factory-resets it. A bare 404 is inert, so the device falls back to its own error screen instead of acting on a half-response. **Do not implement one endpoint at a time** — `/api/display` is only safe once `refresh_rate`, `filename` and `status: 0` are all correct together. The renderer now living in the bundle does not change this; `src/worker.js` routes only the dev preview and otherwise 404s.
-- Nothing is deployed. No Cloudflare Worker exists on the account, and therefore no secrets are set.
+- **Deployed and live as of 2026-08-01.** The BYOS endpoints still 404 by design, so the only working route is `/stats`, and it has been confirmed recording real traffic — including an authenticated request, which is what proves `DEVICE_TOKEN` matches end to end. No device has been paired. The deployed origin is in `.dev.vars` as `WORKER_ORIGIN`, not here.
 - The CPU/hosting question below is **resolved** — Workers Free fits with ~17x headroom. Nothing is blocked on it.
 
 First thing in a fresh checkout: `nvm use && npm install`. `node_modules/` and `package-lock.json` are not committed and the lock file has never been generated, so the first install resolves versions fresh.
@@ -66,11 +70,24 @@ First thing in a fresh checkout: `nvm use && npm install`. `node_modules/` and `
 
 **BYOS** (Bring Your Own Server — their device, our backend; free, no license). The device is pointed at a Cloudflare Worker that serves the BYOS endpoints and renders the image itself.
 
-- One Worker, deployed with `npx wrangler deploy` (never a dashboard paste — wrangler owns it).
-- Secrets via `npx wrangler secret put NAME`; local equivalents in `.dev.vars` (never committed). **`DEVICE_TOKEN` and `OBA_API_KEY` must both be set before the first `wrangler deploy`, not after** — a deployed Worker where `env.DEVICE_TOKEN` is `undefined` makes the token comparison degenerate, which is an open endpoint burning the OneBusAway quota.
+- One Worker, deployed with `npm run deploy` — never a bare `wrangler deploy`, and never a dashboard paste. See the two-accounts warning below for why the script matters.
+- Secrets via `npm run secret -- NAME`; local equivalents in `.dev.vars` (never committed). **`DEVICE_TOKEN` and `OBA_API_KEY` must both be set before the first `wrangler deploy`, not after** — a deployed Worker where `env.DEVICE_TOKEN` is `undefined` makes the token comparison degenerate, which is an open endpoint burning the OneBusAway quota.
 - `npm run dev` runs `wrangler dev` on `localhost:8788`, pinned with `--port` so docs and links stay true. There is no SPA, so `npm run dev` stays a single process — no concurrent Vite alongside it. The design preview rides on this same server at `/_preview`; there is no second process to start. See Conventions.
 - **A dedicated Cloudflare account**, not shared with any other project, on the **Free** plan. Free is confirmed sufficient — see the CPU section below; there is no reason to upgrade.
-- **A Worker already exists at `trmnl-orca-departures.ian-dunn.workers.dev`**, but it is Cloudflare's stock dashboard "Hello World" template, not this repo's code. The first `wrangler deploy` overwrites it. It answers 200 with `text/plain` on every path including `/api/display`, which a device would treat as `HTTPS_JSON_PARSING_ERR` — inert, so it is safe to leave standing until we deploy.
+- **`trmnl-orca-departures.ian-dunn.workers.dev` now runs this repo's code**, deployed 2026-08-01. It previously held Cloudflare's stock "Hello World" template, which the first real deploy overwrote as expected.
+
+#### Never `wrangler login`, and never a bare `wrangler` command that writes
+
+Credentials come from `.cloudflare.env` and nowhere else. `wrangler login` stores ambient OAuth credentials that wrangler will silently prefer, which on a machine with more than one Cloudflare account means a deploy can land somewhere unintended while printing a completely normal success message and a live URL. There is no ambient login on this machine, deliberately — leave it that way.
+
+So: **every wrangler command that touches the account goes through `npm run`** — `deploy`, `tail`, `whoami`, `secret`, `secret:list`. Each prefixes `set -a && . ./.cloudflare.env && set +a`. `dev` and `deploy:check` deliberately do **not**, because neither authenticates and coupling them to deploy credentials would stop a fresh clone from running the tests or the preview.
+
+Two mechanisms make this fail quietly if you improvise:
+
+- **`source .cloudflare.env && wrangler …` does not work.** `source` sets shell variables, not environment variables, so the child process never sees them and wrangler falls back to whatever ambient credentials exist. `set -a` is what exports them.
+- **Auth and target account resolve separately.** A valid API token is not sufficient — `CLOUDFLARE_ACCOUNT_ID` must also be in the environment. **`wrangler whoami` is misleading here:** it lists the accounts a token *can reach*, so it happily prints the right one while an operation resolves a different account. `npm run secret:list` is the honest check, because it actually hits `/accounts/<id>/…`. A wrong account surfaces as `Authentication error [code: 10000]`.
+
+So `CLOUDFLARE_ACCOUNT_ID` legitimately lives in **two** places, and this is not redundancy to clean up: `.cloudflare.env` tells the wrangler CLI which account to act on, and a Worker secret of the same name is the binding our own code reads to build the stats SQL URL. Neither copy is in git, and neither belongs in a tracked file — including this one.
 
 ### The render pipeline and its one hard constraint
 
@@ -418,7 +435,7 @@ Every degraded state needs a `filename` that is **stable for that state** (so it
 https://<worker>/token/<token>/agency/<agency>/stop/<stopId>[,<stopId>]
 ```
 
-giving `/token/<token>/agency/<agency>/stop/<stopId>/api/display`. **Token first** so a bad token short-circuits before any parsing or upstream call. Compare in constant time, and give a bad token the same response as a bad path.
+giving `/token/<token>/agency/<agency>/stop/<stopId>/api/display`. **Token first** so a bad token short-circuits before any parsing or upstream call. Compare in constant time, and give a bad token the same response as a bad path — byte-identical status, headers and body. **Timing is the one deliberate exception**, and only in one direction: see the tarpit rules below.
 
 **The stop segment is one or two comma-separated IDs — never more.** Two is the opposite-directions case (a street pair is two distinct OBA stop IDs under one agency); one is a single-direction sign. Reject three or more with the same response as any other bad path rather than truncating silently, and render in the order given. A comma is a legal unencoded sub-delimiter in a path segment, and OBA stop IDs never contain one, so no escaping is needed.
 
@@ -427,6 +444,48 @@ Labelled segments rather than the earlier `/t/<token>/s/<agency>_<stopId>`, for 
 Everything the device fetches lives under that prefix, `image_url` included — the firmware's auth test is a raw `strncmp` against the stored base URL, so an image URL that diverges before the end of the prefix silently loses its `Access-Token`.
 
 **The token will appear in request logs and analytics** — log a hash or a redacted path, never the raw URL, or the secret lands exactly where people paste when debugging.
+
+#### Opaque before auth, helpful after — the rule the gate implements
+
+Decided 2026-08-01, and it resolves what otherwise reads as a contradiction between "never distinguish a bad token from a bad path" and "a misconfigured stop must be diagnosable":
+
+- **Before the token matches, be maximally opaque.** Every rejection is the same 404. Nothing reveals which half of the URL was right.
+- **After the token matches, be maximally helpful.** A caller holding 32 random bytes is the owner or the owner's device, and there is nothing left to protect from them. `diagnosePath()` in `src/abuse.js` returns *why* a path failed, and that reason is only ever reachable past the token check.
+
+404 rather than 403 for every rejection, which also matches the reference BYOS server — Terminus answers an unknown device key with a 404. The status line barely matters to the device in any case, since it reads `status` from the JSON body; it matters entirely to a scanner, and 404 tells a scanner nothing exists.
+
+#### The tarpit is keyed on path shape, never on token validity
+
+**The obvious design is wrong here and costs an afternoon.** Delaying every auth failure, the way a login form does, breaks the device: its read timeout is 15 seconds, the first three failed polls draw *nothing at all* on a 15/30/60 second backoff, and only the fourth reaches an error screen — roughly seven minutes. So any delay a real device can reach is indistinguishable from the server being down.
+
+That case is not hypothetical, it is the pairing runbook: a token typed into the captive portal with one character wrong produces exactly a well-shaped path with a bad token. A shorter delay is no better, because the radio stays on for its duration and wake count is the whole battery budget.
+
+So:
+
+- **Unshaped path** (fails `extractToken()`) → 25 s tarpit, then 404. A `*.workers.dev` scanner hitting `/`, `/api/display`, `/wp-login.php` lives here, and the device cannot reach it by construction, since every URL the firmware builds starts from a base URL carrying the token.
+- **Well-shaped path, bad token** → **fast 404, no delay.** The pairing typo.
+- **`/stats` wrong password** → tarpit. Human-typed, brute-forceable, no radio involved.
+- **`/robots.txt` and `/favicon.ico`** → answered immediately, specifically so neither is tarpitted. A browser requests the favicon unprompted on every `/stats` visit, and a compliant crawler is trying to ask permission.
+
+**Never gate on `User-Agent`.** The firmware's is undocumented and unverified, and on a 5 GHz access point the device switches to an entirely different HTTP implementation over ESP-AT whose headers nobody has observed. That is the same class of mistake as the WOFF font — a plausible assumption that fails silently and completely.
+
+**Do not port a KV rate limiter.** KV's free write quota is 1000 a day and this sign alone polls ~1440 times a day, so per-request bookkeeping would exhaust it on legitimate traffic before an attacker existed. Enforcement is deliberately absent; observation is the whole mechanism.
+
+### The stats page
+
+`/stats`, HTTP Basic on `STATS_PASSWORD`, matched **before** the token gate because it carries no path secret and would otherwise 404 as an unshaped path. Backed by Analytics Engine: free on the Workers Free plan at 100k writes and 10k read queries a day, written through a Worker binding and read through an HTTP SQL API that needs `CLOUDFLARE_ACCOUNT_ID` and a token scoped to Account Analytics read. **Expected volume is ~3-5k data points a day against that 100k** — there is no quota question, stated so nobody re-derives one.
+
+**Blob and double positions in `src/stats/schema.js` are permanent.** Analytics Engine rows are positional arrays with no schema, so inserting a field mid-list silently reinterprets every historical row, with no migration and no way to detect it afterwards. **Append only.** Queries reference columns through `blobColumn()` rather than writing `blob14`, so appending cannot shift a query onto the wrong column.
+
+**Geo and network are recorded on authenticated requests too, and that is deliberate.** The instinct to strip them is wrong: on a single-device sign the network is a constant, and that is exactly what makes a deviation legible. If the URL token ever leaks, the attacker authenticates *successfully*, and a change of network is the only signal that would ever exist. Cloudflare's own request logs hold the client IP regardless, so omitting it would deny the owner the one view where a compromise is visible without denying anyone else anything. The Device identity panel is built for this and is designed so the normal state is one calm line.
+
+**Stop IDs are recorded raw, by the owner's explicit decision**, because "which stop was this failing request for" is what the page is for. This does not breach the privacy rule, which is about tracked files — the stop still never enters git. The residual risk is narrower and named on the page itself: a screenshot of `/stats` carries roughly a home address.
+
+**The token is never recorded**, only a 4-byte fingerprint, which distinguishes forty attempts at one wrong token from forty different guesses. Raw paths are never recorded either, except for unauthenticated requests, which go through `safeProbePath()` — an **allow-list** that keeps short ordinary segments and replaces anything long or high-entropy with `[redacted]`. Written as an allow-list on purpose: a deny-list of "things that look like a token" would fail the moment the token format changed, and a near-miss URL such as `/toke/<real token>/…` would otherwise write the live secret straight into the dataset.
+
+**Device logs are kept as history, not only streamed.** `/api/log` entries go to a second Analytics Engine dataset via `recordDeviceLogs()` in `src/stats/device-logs.js`, and are read back by the Device logs panel. `console.log` and `wrangler tail` are kept alongside it for watching a device you are standing next to, but they are not a substitute: the entries that matter arrive during a failure, which is exactly when nobody is watching a tail, and `[observability.logs]` retention is a few days in a separate store that cannot be joined against the request rows explaining what the device was reacting to. `sourcePath` plus `sourceLine` are the pair that earns the whole dataset — together they name the exact line of firmware that failed. Its columns are positional and append-only for the same reason the request schema's are.
+
+`src/stats/render.js` is pure and takes a plain data object, so the page is unit-testable with no Analytics Engine mock. **It must escape everything** — it renders attacker-controlled user agents and paths. `src/dev/preview.js` builds HTML without escaping because its inputs are fixtures; that is not a precedent this page can follow.
 
 ### Pointing the device at this Worker
 
@@ -471,7 +530,7 @@ Concretely, none of these may be literals in the code — and the list is illust
 - **The staleness threshold** past which countdowns are refused.
 - **Row count**, which follows from panel size and type scale.
 - **The OneBusAway base URL.** Another region means another deployment; only Puget Sound has been tested.
-- **The header text.** "METRO" is one agency's branding. A Pierce or Community Transit sign needs its own.
+- ~~**The header text.**~~ Withdrawn 2026-08-01. `HEADER_TEXT` existed so a non-Metro agency could relabel the header bar, and it was never consumed: bus boards draw the Metro logo as an embedded asset, and rail draws its own lockup from the board data. Both agencies this sign serves get a logo rather than a word, so the var was config for a case that does not arise. **A different agency is a fork's problem, not a var's** — it needs its own logo asset, which no string could have supplied.
 
 ### Where each kind of value lives, and why
 
