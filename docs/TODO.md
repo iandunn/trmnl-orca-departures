@@ -10,7 +10,7 @@ Settled and written up in `CLAUDE.md`: the Metro-faithful layout, real-time vs s
 
 In `src/` and tested — **202 tests, lint clean**: `render/png.js` (quantise + encoder), `render/board.js` (SVG + `directionLabel`), `render/index.js` (resvg), `assets/` (pre-processed logos), `dev/sample-boards.js`, `dev/preview.js`, `config.js`, `clock.js`, plus `filename.js` and `routing.js` from before.
 
-Docs are split by audience: `README.md` is the overview and links out, `docs/how-it-works.md` explains the BYOS architecture and the constraints it imposes, `docs/deploying.md` is everything needed to stand up your own sign, `docs/development.md` is everything needed to work on the code.
+Docs are split by audience: `README.md` is the overview and links out, `docs/how-it-works.md` explains the BYOS architecture and the constraints it imposes, `docs/alternatives.md` is why it is a Worker rather than Terminus, a plugin, a Pi or Pages, `docs/deploying.md` is everything needed to stand up your own sign, `docs/development.md` is everything needed to work on the code.
 
 `/api/setup`, `/api/display` and `/api/log` all still 404, confirmed against the running server. The renderer being present does not make them safe — they go in together.
 
@@ -90,10 +90,12 @@ Try to do as many of these as possible. Don't do one if it'd overlap code with a
 
 ## High Priority
 
-- [ ] Once this is ready for initial testing
+- [ ] Once this is ready for initial testing (before device arrives)
 	- [ ] compare to the template repo to see if anything should be added/changed or any features would make sense to add etc
 	- [ ] look for any perf optimizations to improve the flicker time or reduce worker load or things of that nature. aslso cruft removal from source code
 	- [ ] Once this is ready for initial testing, run a `/security-review`
+	- [ ] test everything
+	- [ ] audit all the docs to make sure they're accurate and up to date
 
 - [ ] flush wall mount options according to claude - not reviewed
 	- French cleat, VHB'd to the back. A 3–5mm aluminum or printed cleat bonded with 3M VHB 4941, mating to a cleat screwed into the wall. Zero holes in the device, sits nearly flush, holds far more than 450g, and lifts straight up and off for charging. This is what I'd do.
@@ -176,10 +178,11 @@ Try to do as many of these as possible. Don't do one if it'd overlap code with a
 
 ## Low Priority
 
-- [ ] **Reframe `docs/initial-plan.md` as an archive, or prune it.** 797 lines across 61 sections with ~49 superseded/corrected/struck-through markers — larger than `CLAUDE.md` and `README.md` combined, and roughly half of it is decisions that were later reversed: the OG-vs-X debate, six withdrawn hosting options, the 10 ms CPU panic, the WOFF font that never worked.
+- [ ] **Reframe `docs/plans/initial-plan.md` as an archive, or prune it further.** 776 lines across 60 sections with ~49 superseded/corrected/struck-through markers — larger than `CLAUDE.md` and `README.md` combined, and roughly half of it is decisions that were later reversed: the OG-vs-X debate, the 10 ms CPU panic, the WOFF font that never worked.
 	The specific harm is its opening: **"# STATE — Read this first"** competes with `CLAUDE.md`, which is the operative doc. A fresh session can read a dated snapshot and act on it.
 	**Do not simply delete it.** The firmware research there is deeper than the `CLAUDE.md` summary, and the `blueset/trmnl-recipes` prior-art analysis exists nowhere else.
-	Suggested: rename to something like `docs/decision-history.md`, replace the opening with a header pointing at `CLAUDE.md`, and optionally drop the fully-withdrawn hosting options and Addendum 01. It has been patched with strikethroughs about eight times; that is the wrong shape for a doc that is really a record.
+	Suggested: rename to something like `docs/decision-history.md`, replace the opening with a header pointing at `CLAUDE.md`, and optionally drop Addendum 01. It has been patched with strikethroughs about eight times; that is the wrong shape for a doc that is really a record.
+	**The rejected-options half is already done.** `docs/alternatives.md` now owns Terminus, the hosted plugin, a Pi, Pages and the six withdrawn hosting options; the four sections here that duplicated them were replaced with pointers on 2026-08-01. What remains to prune is the OG-vs-X debate and the CPU-panic sections. The `blueset/trmnl-recipes` prior-art analysis is still the part that exists nowhere else — keep it.
 
 - [ ] **Remove dead exports in `src/`.** Five exported symbols with no consumer — but one of them is parked on purpose, so read before deleting:
 	- `obaMark()` in `render/board.js`, plus the `OBA_VEHICLES_*` assets it needs. **Keep this one.** The footer stopped drawing the OneBusAway mark on 2026-08-01 and it is exported only so it stays reachable; putting it back is a one-line change and re-deriving the two-step recolour is not.
@@ -219,11 +222,9 @@ Try to do as many of these as possible. Don't do one if it'd overlap code with a
 	- Their render is sized for whatever device model the key is registered to, and the docs' older examples show `.bmp` — **BMP is completely broken on the X**. Verify the format before trusting it, and be ready to re-encode.
 	- Rotating between sources changes the image and so the `filename`, which means a repaint. That is correct, but it interacts with the flicker budget — a rotating playlist gives up the zero-flicker no-op that unchanged departures currently enjoy.
 
-	**The other route is running Terminus instead of this Worker, which would bring the plugin ecosystem with it.** `usetrmnl/terminus` is the official reference BYOS server — Ruby and Hanami, not Rails — with playlists, a device dashboard, a log viewer, firmware OTA hosting, auto-provisioning and sensors. Checked against its own repo 2026-08-01, so this is verified rather than assumed: `doc/extensions.adoc` marks both **Import (Core)** and **Recipes** as supported, so every plugin and recipe comes across natively — no proxying, no re-rendering, no `access-token` juggling.
+	**Running Terminus instead of this Worker is the other route, and it is settled — see [alternatives.md](alternatives.md#running-terminus-instead-of-this-worker).** It would bring the plugin ecosystem across natively, and it loses because it cannot be serverless. Not open work; do not re-litigate it here.
 
-	**The trade is the whole shape of the project, not a feature toggle, and it loses on the axis this design cares most about.** Its `Gemfile` requires PostgreSQL, Valkey, Sidekiq, Puma, ImageMagick and `ferrum`, which needs a real Chromium binary — so it cannot be serverless, and wants a home server, a Pi or a VPS. The stated top risk here is that an unreachable server leaves stale departures on the glass with no possible server-side defense, and a box in a closet is the component most likely to die quietly. Two smaller costs: screens are **pre-built on a cron** (`app/aspects/screens/rotator.rb` returns an existing `item.screen`), so freshness becomes build schedule ∩ poll schedule rather than render-on-request; and the X model authors at 1040x780 CSS pixels with `--pixel-ratio: 1.8`, against this design's rule of drawing at native resolution. It is also either/or — one device, one base URL.
-
-	A middle path exists: keep this Worker as the sign and pull plugin *data* from trmnl.com per the API above, so the plugin ecosystem arrives without giving up serverless or the render.
+	The live option is the middle path: keep this Worker as the sign and pull plugin *data* from trmnl.com per the API above, so the plugin ecosystem arrives without giving up serverless or the render.
 
 
 - [ ] **Consider showing OneBusAway service alerts.** The real Connectpoint signs devote a block to them, and it is genuinely the most useful thing on the sign when it fires — a cancelled trip is otherwise invisible in a departures list.

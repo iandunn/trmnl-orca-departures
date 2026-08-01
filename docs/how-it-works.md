@@ -2,14 +2,17 @@
 
 TRMNL devices normally talk to TRMNL's own servers. This project uses **BYOS** (Bring Your Own Server) instead: the device is pointed at a CloudFlare Worker that implements the three endpoints TRMNL's firmware expects.
 
-**There is no plugin here, and that is not an omission.** A TRMNL can get its image one of two ways, and they are mutually exclusive:
+**There is no plugin here, and that is not an omission.** A TRMNL can get its image three ways, and they are mutually exclusive:
 
-- **Hosted platform.** The device talks to `trmnl.app`, you configure *plugins* in their dashboard, and their servers render your data into an image. Plugins can be public or private — private ones are not a marketplace thing — but either way the rendering happens on their infrastructure.
-- **BYOS, which is this.** The device talks to our Worker. It asks what image to show and how long to sleep; we answer. No dashboard, no playlist, no templates, no TRMNL account involved.
+- **The hosted platform.** The device talks to `trmnl.app`, you configure *plugins* in their dashboard, and their servers render your data into an image. Plugins can be public or private — private ones are not a marketplace thing — but either way the rendering happens on their infrastructure.
+
+- **BYOS, running [Terminus](https://github.com/usetrmnl/terminus)** — the official reference server, self-hosted. It brings playlists, a dashboard and the whole plugin ecosystem, and it needs PostgreSQL, Sidekiq and a Chromium binary to do it.
+
+- **BYOS, running your own server, which is this.** The device talks to our Worker. It asks what image to show and how long to sleep; we answer. No dashboard, no playlist, no templates, no TRMNL account involved.
 
 So there is nothing to convert into a plugin. Pointing the device's server URL at the Worker *is* how this loads.
 
-BYOS was chosen because the hosted path cannot express the things this sign depends on: a content-hash `filename` (the whole flicker and error-screen design), a server-controlled `refresh_rate` (commute windows and overnight sleep), and keeping the stop out of anyone else's account. [initial-plan.md](initial-plan.md) records that comparison in full.
+The last option was chosen because the hosted path cannot express the things this sign depends on — a content-hash `filename` (the whole flicker and error-screen design), a server-controlled `refresh_rate` (commute windows and overnight sleep), and keeping the stop out of anyone else's account — and because Terminus, which can express all three, cannot run serverless. A sign whose worst failure is an unreachable server should not depend on a box in a closet. [alternatives.md](alternatives.md) is the full comparison, including a Pi, GitHub Pages, and what running Terminus would have gained.
 
 - `GET /api/setup` — first contact; issues the device an API key.
 - `GET /api/display` — the workhorse. Returns the image URL, a cache-key filename, and the number of seconds to sleep before polling again.

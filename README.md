@@ -13,7 +13,8 @@ A [TRMNL X](https://trmnl.com/) device wakes on an interval and polls a [Cloudfl
 
 ## Documentation
 
-- **[How it works](docs/how-it-works.md)** — why BYOS rather than a plugin, the three endpoints, and the two design constraints everything else follows from: the content-hash `filename` and the "Updated at" timestamp.
+- **[How it works](docs/how-it-works.md)** — why BYOS rather than a plugin or the reference server, the three endpoints, and the two design constraints everything else follows from: the content-hash `filename` and the "Updated at" timestamp.
+- **[Alternatives considered](docs/alternatives.md)** — the pros and cons of running Terminus, a hosted plugin, a Raspberry Pi, or GitHub Pages instead, and why each lost for this particular sign.
 - **[Deploying](docs/deploying.md)** — running your own sign: OneBusAway key, finding your stop IDs, your own Cloudflare Worker, pairing the device, and every configuration value.
 - **[Development](docs/development.md)** — working on the code: local dev, the design preview, what lives where, and the firmware traps that fail silently.
 

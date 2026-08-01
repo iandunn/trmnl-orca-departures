@@ -67,8 +67,10 @@ BYOS = Bring Your Own Server (their hardware, our backend). Free — no license.
 **Cloudflare Worker, not a Raspberry Pi and not GitHub Pages.**
 
 - GitHub Pages is static and can't call OneBusAway at request time. Actions cron bottoms out at 5 min and is unreliable. Rejected.
-- ~~A Pi in the home network rack works technically but puts the server on the wrong network.~~ **This rejection is void as of 2026-08-01** — the sign and the rack are the same network, because the sign lives here. A Pi is now a legitimate option with no CPU ceiling at all. Its real costs are different ones: a box to maintain, and a sign that goes down when the home network or power does. See the hosting section.
+- ~~A Pi in the home network rack works technically but puts the server on the wrong network.~~ **This rejection is void as of 2026-08-01** — the sign and the rack are the same network, because the sign lives here. A Pi is now a legitimate option with no CPU ceiling at all. Its real costs are different ones: a box to maintain, and a sign that goes down when the home network or power does.
 - Worker: free tier trivially covers ~1440 polls/day, provides HTTPS (device does TLS 1.2), and has no host to maintain.
+
+Every rejected option here — Pages, a Pi, a hosted plugin, and running Terminus — is written up properly in [`../alternatives.md`](../alternatives.md). That doc is current; this one is a record.
 
 ### Project scaffolding — BUILT 2026-07-31
 
@@ -197,14 +199,9 @@ Cost tracks pixel count almost linearly (~14.6 ns/px), so the X's true 1872x1404
 
 Resolving that second point is the cheapest possible way to discriminate between all the options below: deploy the spike to the real free account under a throwaway name, hit it, and read actual CPU from `wrangler tail` (which surfaces `exceededCpu` directly), then delete it. Until that is done, everything in this section is inference.
 
-#### Rejected: GitHub / GitLab Pages — a contract failure, not a bad fit
+#### Rejected: GitHub / GitLab Pages — moved to `docs/alternatives.md`
 
-Asked and answered 2026-07-31. Pages cannot implement `/api/display` **at all**, for reasons that have nothing to do with hosting quality:
-
-- **`refresh_rate` must be present on every response**, and absent parses as 0 → NVS → flat battery. A static file can't vary it.
-- **`filename` must be a content hash that changes iff the image bytes change.** A static file is either permanently stale (frozen panel) or permanently changing (constant flicker).
-
-The nuance, since it was asked: a **hybrid** — Worker serves the JSON (~1 ms, fits Free), Pages hosts the PNG bytes — is structurally possible. Images on a different host need no auth, only public fetchability, which Pages does fine. What kills it is the scheduler: GitHub Actions cron has a **5-minute floor** and habitually slips 10–30 minutes. That makes the countdown row ("4" over "min") actively wrong, and that row is the signature element of the whole design. Also, unlimited Actions minutes require a **public repo**, which publishes the stop ID — i.e. roughly where the user lives. Recorded and rejected.
+Asked and answered 2026-07-31; the full reasoning now lives in [`../alternatives.md`](../alternatives.md#github-or-gitlab-pages). In short, a `404.html` handler solves routing but not per-request content, and a content-hash `filename` that never moves freezes the panel permanently.
 
 #### Re-measured properly — 2026-08-01. The ~40 ms figure was wrong twice over
 
@@ -272,16 +269,7 @@ Two things worth carrying forward:
 
 **Consequences.** Every option below is withdrawn — Workers Paid, Vercel, Deno Deploy, DreamHost, a Raspberry Pi, band-splitting across subrequests, a hand-rolled glyph blitter, the hosted-plugin path, and dropping back to the OG. None of them were solving a real problem. The design stays exactly as written: one Worker, Free plan, resvg, real font rendering, antialiasing on, native 1872x1404. **Antialiasing stays on** — the `optimizeSpeed` experiment was only ever a budget concession and there is no budget to concede to.
 
-The sections below are kept because the reasoning is sound and would apply if the render ever grew ~17x, not because any of it is live.
-
-#### Superseded: pick a hosting answer before writing the renderer
-
-1. **Workers Paid, $5/mo — recommended.** 40 ms against a 30 s budget deletes CPU as a design constraint permanently, keeps one deployable, and preserves resvg (real font rendering and antialiasing, which matters at 16 greys). $60/yr.
-2. **Render off Cloudflare on a free host with a real CPU budget** — Vercel Hobby (10 s per invocation), Deno Deploy, or similar; Cloudflare Pages Functions do *not* qualify, being the same runtime and limits. Free, but now two deployables and two failure domains.
-3. **Hand-rolled renderer** — build-time glyph atlas blitted into a 4-bit buffer. At the OG's 0.39 M pixels this was an easy ~1 ms; at the X's 2.6 M pixels and 1.3 MB of output it is 5-15 ms of pure integer work, i.e. *still plausibly over budget* while also costing antialiasing and hand-written text layout. The X's resolution largely destroys this option's appeal.
-4. **Drop back to the OG.** 6 ms fits Free, barely. Costs everything Addendum 01 argues for.
-5. **Slice the render across subrequests** (6 bands, 6 x ~7 ms, each with its own 10 ms budget, stitched as raw/BMP byte ranges so stitching is nearly free). Fits Free on paper and is genuinely clever. Also fragile and complex for a gift. Recorded, not recommended.
-6. **Abandon BYOS for a hosted TRMNL plugin** — added 2026-08-01. TRMNL's cloud does the rendering, so the CPU ceiling stops existing; the Worker survives as a JSON endpoint only. Costs `filename`, `refresh_rate`, the error-screen design and the stop's privacy. See "Prior art — `blueset/trmnl-recipes`" below for the full accounting.
+The six hosting options this section used to enumerate — Workers Paid, rendering off Cloudflare, a hand-rolled glyph blitter, dropping back to the OG, band-splitting across subrequests, and abandoning BYOS for a hosted plugin — are recorded in [`../alternatives.md`](../alternatives.md#withdrawn-when-the-cpu-number-turned-out-to-be-stale) rather than here, since none of them is live.
 
 ### BYOS endpoints — VERIFIED 2026-07-31
 
@@ -660,18 +648,9 @@ What it settles for us:
 
 **Stop ID shapes to design for**, from the author's own placeholder examples: `40_532`, `1_1550`, `96_SCM`, `40_E15-T1`, `40_S_KS_T3`. Route IDs likewise: `40_100479`, `23_100340`, `40_2LINE`, `51_60`. The agency prefix is the first underscore-delimited field and the rest is opaque — this is what drove the labelled-segment URL decision above.
 
-#### The hosted-plugin path — recorded as a hosting option, not recommended
+#### The hosted-plugin path — moved to `docs/alternatives.md`
 
-Because the author's plugin renders on TRMNL's servers, the 10 ms CPU problem simply does not exist for them. That makes "abandon BYOS, ship a private plugin, keep the Worker as a JSON endpoint" a real sixth entry on the hosting list above, and it is worth writing down rather than rediscovering later.
-
-It is still the wrong trade here, for reasons that are specific to this project rather than general:
-
-- **It gives up `filename`.** The content-hash cache key is the only flicker defense on the X and the mechanism the whole error design hangs off. A hosted plugin has no access to it.
-- **It gives up `refresh_rate` scheduling**, so the commute-window logic and the overnight sleep go with it.
-- **It gives up distinct-filename error screens**, which the X firmware research established as essentially the entire failure story.
-- **It moves the stop onto trmnl.com.** The stop lives in device NVS today precisely so it is never written down anywhere; plugin settings are stored on someone else's account. That is a different privacy posture than the one this design was built around.
-
-If the CPU measurement comes back bad, this competes with Workers Paid at $5/mo — and $5/mo keeps all four of the above. Record it, do not reach for it first.
+Because the author's plugin renders on TRMNL's servers, the CPU question does not exist for them, which made "abandon BYOS, ship a private plugin, keep the Worker as a JSON endpoint" a real option. It was rejected: see [`../alternatives.md`](../alternatives.md#a-hosted-trmnl-plugin) for what it costs.
 
 ## Layout spec
 
