@@ -1,0 +1,57 @@
+name = "trmnl-orca-departures"
+main = "src/worker.js"
+compatibility_date = "2026-06-07"
+preview_urls = true
+
+[observability.logs]
+enabled = true
+
+# Deployment config. Nothing here is secret and nothing here is a home address, so it is committed
+# — a fork edits this block and redeploys. Secrets go through `wrangler secret put`; the agency and
+# stop IDs travel in the device's URL path so they are never written down in the repo at all.
+#
+# The rule these exist to serve is in CLAUDE.md: no deployment-specific value may be a literal in
+# the code. Add to this block rather than reaching for a constant.
+#
+# `DIRECTION_OVERRIDES` is the one display value that must NOT be added here — it is keyed by stop
+# ID, so this sign's entry would be a home address in a committed file. It goes in `.dev.vars` and
+# `wrangler secret put` instead. See `.dev.vars.example`.
+#
+# Everything below is read only through `readConfig()` in `src/config.js`, which coerces and
+# range-checks each value. Note the types differ by origin: a number here arrives as a number, while
+# the same name set in `.dev.vars` or as a secret arrives as a string.
+[vars]
+# IANA timezone. Everything the sign displays or schedules is computed in local time.
+TIMEZONE = "America/Los_Angeles"
+
+# The active window, local time, 24h. Outside it the sign sleeps until the next start — computed
+# fresh each evening rather than assumed, because the device wakes to poll rather than on a clock.
+ACTIVE_START = "06:00"
+ACTIVE_END = "22:00"
+
+# Seconds between polls. `refresh_rate` is unclamped by the firmware, so the overnight value is
+# just a large number. Absent or 0 hot-loops the device and flattens the battery — never omit it.
+REFRESH_ACTIVE_SECONDS = 60
+REFRESH_IDLE_SECONDS = 900
+
+# Agency branding in the header bar. "METRO" is King County Metro's; another agency needs its own.
+HEADER_TEXT = "METRO"
+
+# The regional OneBusAway deployment. Only Puget Sound has been tested.
+OBA_BASE_URL = "https://api.pugetsound.onebusaway.org/api/where"
+
+# Required for the bundled font, or the static import fails.
+#
+# `**/*.wasm` must NOT be listed here. Declaring it as Data overrides wrangler's built-in
+# CompiledWasm rule and hands `initWasm()` raw bytes, which makes it call
+# `WebAssembly.instantiate(buffer)` — workerd forbids that and throws "Wasm code generation
+# disallowed by embedder". Measured 2026-08-01.
+#
+# Fonts must be TTF, not WOFF: resvg parses raw sfnt and cannot decompress a WOFF container.
+# A WOFF loads without error and then renders every layout with no text at all.
+#
+# `fallthrough` keeps wrangler's built-in Data rule for `**/*.bin` active instead of shadowing it.
+[[rules]]
+type = "Data"
+globs = ["**/*.ttf"]
+fallthrough = true

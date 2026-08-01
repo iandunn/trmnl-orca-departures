@@ -1,0 +1,71 @@
+# Copy to .dev.vars and fill in. That file is gitignored and holds the values this repo
+# deliberately does not carry: the stop, the deployed origin, and the secrets.
+#
+# Production equivalents are set with `npx wrangler secret put NAME`, never through the
+# Cloudflare dashboard's Variables UI — `wrangler deploy` wipes those.
+#
+# Everything that is neither secret nor privacy-sensitive lives in `[vars]` in `wrangler.toml`
+# instead. See docs/deploying.md.
+
+# The agency that owns the stop pole. Agency IDs in the Puget Sound OneBusAway deployment,
+# queried live 2026-08-01 from `agencies-with-coverage.json`. One key and one endpoint cover
+# all of them:
+#
+#    1  Metro Transit (King County Metro)     40  Sound Transit (Link + ST Express)
+#    3  Pierce Transit                        51  Amtrak
+#   19  Intercity Transit                     95  Washington State Ferries
+#   20  Kitsap Transit                        96  Seattle Center Monorail
+#   23  City of Seattle (streetcar)           97  Everett Transit
+#   29  Community Transit
+#
+# The prefix is the stop's owner, not the routes serving it — a `1_` stop returns Sound
+# Transit routes too, so ST Express buses need no second agency. Link is the exception, since
+# stations are their own `40_` stops.
+DEV_AGENCY_ID=
+
+# One or two stop IDs, comma separated, without the agency prefix — the same shape as the
+# `stop` segment of the device's base URL. Two is the opposite-directions case; opposite
+# directions are separate stops in OneBusAway, not a field on one stop.
+#
+# Kept out of the repo because a single stop implies a home address.
+DEV_STOP_ID=
+
+# Deployed Worker origin, e.g. https://<worker>.<subdomain>.workers.dev
+WORKER_ORIGIN=
+
+# Shared secret for the URL path segment. Generate with `openssl rand -hex 32`.
+DEVICE_TOKEN=
+
+# Enables the local design preview at http://localhost:8788/_preview — a contact sheet of every
+# sample board, re-rendered on each reload.
+#
+# This belongs here and nowhere else. `wrangler dev` reads `.dev.vars`; `wrangler deploy` never
+# uploads it, so the variable simply does not exist in production and the preview routes 404 like
+# everything else. Do NOT move it into `[vars]` in `wrangler.toml` — that block IS deployed.
+DEV_PREVIEW=1
+
+# OneBusAway Puget Sound API key. Sound Transit is the only issuer — OBA is open-source
+# software with no central key authority, and the Puget Sound deployment is theirs:
+# https://www.soundtransit.org/Open-Transit-Data
+# `TEST` works for development but is heavily rate-limited (HTTP 429). Do not ship on it.
+OBA_API_KEY=
+
+# Per-stop direction labels, as JSON keyed by full OBA stop ID — the agency prefix is required
+# here even though the agency is set separately:
+#
+#   DIRECTION_OVERRIDES={"1_590":"Northbound","1_430":"Southbound"}
+#
+# OneBusAway reports a compass bearing and never a word, so the label is derived: N becomes
+# "Northbound", NW becomes "Northwest bound". That is correct for every stop in the region with
+# no lookup table. This replaces it only where the bearing itself misleads — 3rd Ave runs
+# diagonally, so its stops report NW/SE where every rider says northbound. Most stops need no
+# entry. Keep it to a few; a county-wide table defeats the point of deriving the label.
+#
+# It lives here and not in `[vars]` for the same reason DEV_STOP_ID does: a map keyed by the stop
+# this sign points at is a home address, and `wrangler.toml` is committed. Set it in production
+# with `npx wrangler secret put DIRECTION_OVERRIDES`. Malformed JSON degrades to no overrides
+# rather than failing a render.
+#
+# The sample boards have their own overrides in `src/dev/sample-boards.js` — those stops are
+# public downtown ones chosen precisely so they can be written down.
+DIRECTION_OVERRIDES=

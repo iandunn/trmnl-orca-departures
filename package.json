@@ -1,0 +1,26 @@
+{
+	"name": "trmnl-orca-departures",
+	"private": true,
+	"license": "GPL-2.0-or-later",
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"dev": "wrangler dev --port 8788",
+		"deploy": "wrangler deploy",
+		"tail": "wrangler tail",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"lint": "eslint ."
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"eslint": "^10.8.0",
+		"globals": "^17.8.0",
+		"vitest": "^4.1.10",
+		"wrangler": "^4.118.0"
+	},
+	"dependencies": {
+		"@expo-google-fonts/fira-sans": "^0.4.1",
+		"@resvg/resvg-wasm": "^2.6.2"
+	}
+}
