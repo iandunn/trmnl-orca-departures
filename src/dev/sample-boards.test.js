@@ -54,6 +54,20 @@ describe( 'sample boards', () => {
 		} );
 	} );
 
+	// The bus stops are three blocks apart rather than two sides of one street, which is the case the
+	// per-group name exists for. The rail groups name one station twice, which is the case that shows
+	// the name is unconditional rather than a fallback.
+	it( 'names the stop on every group of both boards', () => {
+		expect( BUS_BOARD.groups.map( ( group ) => group.name ) ).toEqual( [
+			'3rd Ave & Virginia St',
+			'3rd Ave & Pine St',
+		] );
+		expect( RAIL_BOARD.groups.map( ( group ) => group.name ) ).toEqual( [
+			"Int'l District/Chinatown",
+			"Int'l District/Chinatown",
+		] );
+	} );
+
 	it( 'renders both boards at whatever moment the caller passes', () => {
 		const boards = sampleBoards( {
 			nowMs: Date.parse( '2026-12-25T07:09:00-08:00' ),

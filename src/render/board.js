@@ -10,6 +10,8 @@
  */
 
 import { METRO_LOGO_DATA_URI } from '../assets/metro-logo.js';
+import { collapseRepeatedPhrases } from '../headsign.js';
+import { destinationWithRoute, routeBadge } from '../route-badge.js';
 import {
 	OBA_TRAM_RATIO,
 	OBA_TRAM_VIEWBOX,
@@ -183,7 +185,76 @@ export function obaMark( x, y, height ) {
 const BADGE_WIDTH = 152;
 const BADGE_HEIGHT = 94;
 
-function badge( x, top, label, mode, scaled ) {
+/** Where the destination column starts, immediately right of the badge slot. */
+const DESTINATION_LEFT = 252;
+
+/**
+ * Room reserved at the right of a row for the countdown or clock time.
+ *
+ * Wide enough for `4:47` at the row's own type scale plus a gap, since the time is right-aligned on
+ * `RIGHT` and the destination is the only thing that can run into it.
+ */
+const TIME_COLUMN_WIDTH = 220;
+
+/**
+ * Average advance per character of Fira Sans Bold, as a fraction of font size.
+ *
+ * An estimate, and deliberately a pessimistic one. resvg does the shaping and the font is only
+ * loaded in `index.js`, so nothing here can measure a string — but the destinations are all Latin
+ * place names of similar case mix, which makes an average behave. Calibrated against a render:
+ * `Pioneer Square Chinatown International District Waterfront`, the longest headsign the region
+ * returns at 58 characters, measures about 0.46 per character. Rounding up to 0.5 buys roughly 8%
+ * of slack, which costs a slightly smaller type size on the few rows that need shrinking at all and
+ * protects against a headsign with wider letterforms than the one it was measured on.
+ */
+const AVERAGE_ADVANCE = 0.5;
+
+/** Below this the destination is no longer readable across a room, so it is allowed to overrun. */
+const MIN_DESTINATION_SIZE = 40;
+
+/**
+ * One destination size for the whole board, set by whichever destination needs the most room.
+ *
+ * **Per board rather than per row, deliberately.** Fitting each row independently produces a board
+ * with two type sizes in it, and that reads as a rendering fault rather than as a fit — the eye sees
+ * the mismatch long before it sees the reason for it. Sizing every row to the longest keeps the
+ * column looking like one column, at the cost of a slightly smaller size on rows that would have
+ * fitted at full size anyway.
+ *
+ * Long destinations only collide on a **sparse** board, which is the counter-intuitive part:
+ * `rowMetrics()` clamps rather than stretches, so a board with two departures left in the day draws
+ * them at full height and full type size, and the longest headsign then runs straight through the
+ * time. A dense board scales the same string down until it fits on its own.
+ *
+ * @param {string[]} labels
+ * @param {Function} scaled
+ * @returns {number}
+ */
+function destinationSize( labels, scaled ) {
+	const ceiling = scaled( 58 );
+	const longest = labels.reduce( ( most, label ) => Math.max( most, label.length ), 0 );
+
+	if ( ! longest ) {
+		return ceiling;
+	}
+
+	const available = RIGHT - scaled( TIME_COLUMN_WIDTH ) - DESTINATION_LEFT;
+	const fitted = Math.floor( available / ( longest * AVERAGE_ADVANCE ) );
+
+	return Math.max( Math.min( ceiling, fitted ), scaled( MIN_DESTINATION_SIZE ) );
+}
+
+function badge( x, top, shortName, mode, scaled ) {
+	const label = routeBadge( shortName );
+
+	// 39 routes region-wide have no short name — every ferry route, and Amtrak Cascades. Drawing the
+	// plate anyway would put an empty black block where a route number belongs, which reads as a
+	// rendering fault. The slot is simply left blank; the destination column is a fixed x, so nothing
+	// shifts and the rows stay aligned with every other row on the board.
+	if ( ! label ) {
+		return '';
+	}
+
 	const height = scaled( BADGE_HEIGHT );
 	const centre = x + BADGE_WIDTH / 2;
 	const baseline = top + scaled( 68 );
@@ -196,6 +267,50 @@ function badge( x, top, label, mode, scaled ) {
 	const size = scaled( String( label ).length > 2 ? 50 : 58 );
 
 	return shape + text( centre, baseline, size, label, { fill: '#fff', anchor: 'middle' } );
+}
+
+/**
+ * Direction and stop name on one baseline, flowed rather than placed.
+ *
+ * `tspan` does the flowing because the name has to start wherever the direction ends, and text width
+ * is not knowable here — the font is only loaded in `index.js`. A fixed x would have to clear
+ * "Northwest bound", which is the longest label, and would leave a gap after every short one.
+ */
+function headingWithName( x, y, heading, name ) {
+	if ( ! name ) {
+		return text( x, y, 32, heading, { fill: '#333', spacing: 3 } );
+	}
+
+	// OneBusAway leaves `stop.direction` empty for a fair number of stops — 24 of the 515 seen while
+	// surveying, one of them a Link platform — and `directionLabel()` honestly returns nothing for
+	// those. The name then takes the whole slot rather than sitting indented behind an empty label.
+	if ( ! heading ) {
+		return text( x, y, 32, name, { weight: 400, fill: GREY } );
+	}
+
+	return (
+		`<text x="${ x }" y="${ y }" font-family="${ SIGN_FONT }" font-size="32" fill="#333">` +
+		`<tspan font-weight="700" letter-spacing="3">${ escapeText( heading ) }</tspan>` +
+		`<tspan dx="26" font-weight="400" fill="${ GREY }">${ escapeText( name ) }</tspan>` +
+		`</text>`
+	);
+}
+
+/**
+ * Every group names its own stop, even when both groups name the same one.
+ *
+ * The footer carried it once while a board was assumed to be one street in both directions. That
+ * assumption does not hold: the two stops may be blocks apart, and even a true across-the-street
+ * pair can carry different names when the cross streets differ. Naming the stop in every band is
+ * right in all of those cases and costs a repeated line in only one, so the band is the single place
+ * a reader ever looks for it.
+ */
+function directionBand( group, y ) {
+	return (
+		`<rect x="0" y="${ y }" width="${ PANEL_WIDTH }" height="${ BAND_HEIGHT }" fill="#e6e6e6"/>` +
+		headingWithName( LEFT, y + 40, group.heading.toUpperCase(), group.name ) +
+		text( RIGHT, y + 41, 32, group.stop, { weight: 400, fill: GREY, anchor: 'end' } )
+	);
 }
 
 /** Light-rail glyph, for a mixed board. Unused while bus and rail stops stay separate. */
@@ -218,6 +333,8 @@ function textLockup( agency, mode ) {
 /**
  * @typedef  {object} Departure
  * @property {string}  badge Route short name, as OneBusAway reports it.
+ * @property {string}  [routeName] Route long name. Only consulted when there is no short name, which
+ *                                 is every ferry route and Amtrak Cascades.
  * @property {string}  to    Trip headsign.
  * @property {string}  value `Now`, a minute count, or a clock time.
  * @property {string}  unit  `min`, `pm`, or empty for `Now`.
@@ -226,13 +343,14 @@ function textLockup( agency, mode ) {
  * @typedef  {object} Group
  * @property {string}      heading
  * @property {string}      stop
+ * @property {string}      name  This group's own stop name, drawn in its band. Two groups may name
+ *                               the same stop; they are not assumed to.
  * @property {Departure[]} rows
  *
  * @typedef  {object} Board
  * @property {'bus'|'rail'} mode
- * @property {string}       agency   Header lockup text. Metro gets its logo instead.
+ * @property {string}       agency Header lockup text. Metro gets its logo instead.
  * @property {Group[]}      groups
- * @property {string}       stopName Shown once in the footer; both groups share it.
  * @property {string}       weekday
  * @property {string}       date
  * @property {string}       clock
@@ -247,27 +365,38 @@ function textLockup( agency, mode ) {
 export function buildBoardSvg( board ) {
 	const { mode = 'bus', groups = [] } = board;
 	const { height: rowHeight, scaled } = rowMetrics( groups );
+
+	// Resolved before anything is drawn, because the type size depends on the longest of them.
+	const prepared = groups.map( ( group ) => ( {
+		...group,
+		rows: group.rows.map( ( row ) => ( {
+			...row,
+			destination: destinationWithRoute( row.badge, row.routeName, collapseRepeatedPhrases( row.to ) ),
+		} ) ),
+	} ) );
+	const destinationFontSize = destinationSize(
+		prepared.flatMap( ( group ) => group.rows.map( ( row ) => row.destination ) ),
+		scaled
+	);
+
 	let body = '';
 	let y = HEADER_HEIGHT;
 
-	groups.forEach( ( group, groupIndex ) => {
+	prepared.forEach( ( group, groupIndex ) => {
 		// Negative space before the direction switches, so the groups read as separate boards
 		// rather than one long list that happens to have a label in the middle.
 		if ( groupIndex > 0 ) {
 			y += GROUP_GAP;
 		}
 
-		body +=
-			`<rect x="0" y="${ y }" width="${ PANEL_WIDTH }" height="${ BAND_HEIGHT }" fill="#e6e6e6"/>` +
-			text( LEFT, y + 40, 32, group.heading.toUpperCase(), { fill: '#333', spacing: 3 } ) +
-			text( RIGHT, y + 41, 32, group.stop, { weight: 400, fill: GREY, anchor: 'end' } );
+		body += directionBand( group, y );
 
 		y += BAND_HEIGHT;
 
 		group.rows.forEach( ( row, rowIndex ) => {
 			body +=
 				badge( LEFT, y + scaled( 26 ), row.badge, mode, scaled ) +
-				text( 252, y + scaled( 94 ), scaled( 58 ), row.to );
+				text( DESTINATION_LEFT, y + scaled( 94 ), destinationFontSize, row.destination );
 
 			// Metro's own answer to the real-time question: the word above the time, small and
 			// grey, only on scheduled rows. It needs no legend and costs no contrast.
@@ -313,7 +442,6 @@ export function buildBoardSvg( board ) {
 		// ours can fail with no way to say so, and this is the only cue that survives that. It starts
 		// at the left margin rather than clearing a logo, so the words get the full footer width.
 		text( LEFT, 1362, 38, `Updated at ${ board.asOf }`, { weight: 400, fill: GREY } ) +
-		text( RIGHT, 1362, 38, board.stopName, { weight: 400, fill: GREY, anchor: 'end' } ) +
 		`</svg>`
 	);
 }

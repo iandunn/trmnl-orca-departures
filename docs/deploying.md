@@ -79,6 +79,8 @@ https://<your-worker>.workers.dev/token/<your-token>/agency/<agency>/stop/<stopI
 
 The stop segment takes one or two comma-separated IDs, without the agency prefix. Three or more is rejected rather than truncated.
 
+The two need not be opposite directions of one street. Whichever two stops you actually walk to is a valid pairing — the board names each one in its own band, so a pair a few blocks apart reads correctly. That is what the sample board does, and it is often the only way to get the routes you care about onto one screen: a street's two stop zones can carry different route sets entirely.
+
 The URL is saved **only if the WiFi credentials also succeed**, so a wrong WiFi password silently discards it and looks like the sign ignoring your server. Changing this URL later wipes the device's stored credentials and forces a clean re-pair — that is the supported way to move it to a different stop or server, not a fault.
 
 Everything the device fetches lives under that prefix, images included: the firmware's auth check is a raw string compare against the stored base URL, so an image URL that diverges from it silently loses its token header.
@@ -102,7 +104,7 @@ The band above each group says which way the buses are going. OneBusAway supplie
 What it cannot fix is a bearing that is accurate and still misleading. 3rd Ave runs diagonally through downtown, so its stops report `NW` and `SE` while every rider and every Metro timetable says northbound and southbound. `DIRECTION_OVERRIDES` replaces the label for exactly those stops — a JSON map keyed by full OneBusAway stop ID, agency prefix included:
 
 ```
-DIRECTION_OVERRIDES={"1_590":"Northbound","1_430":"Southbound"}
+DIRECTION_OVERRIDES={"1_600":"Northbound","1_430":"Southbound"}
 ```
 
 Most stops need no entry. Keep it to the handful where the bearing misleads; a region-wide table would defeat the point of deriving the label at all. Malformed JSON degrades to no overrides rather than failing a render.

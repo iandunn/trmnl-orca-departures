@@ -54,6 +54,10 @@ The sample boards are in `src/dev/sample-boards.js`. Their route numbers, headsi
 
 They carry their own `SAMPLE_DIRECTION_OVERRIDES` rather than reading the deployment's `DIRECTION_OVERRIDES`, for the same reason — those stop IDs are public, so they can be written down. See [deploying.md](deploying.md#direction-labels-and-overriding-them-per-stop) for what the override does.
 
+Below the two reference boards, the sheet carries a set of **edge cases** from `src/dev/edge-case-boards.js`: route names against the badge slot in both bus and rail modes, the headsigns that must collapse and the ones that must not, the longest stop name in the region, a stop that reports no compass bearing, and a sparse board rendered at the row-height ceiling. Every name on them is real OneBusAway data; what is synthetic is the co-location, since these routes do not call at one stop, and each group says so where a real board puts the stop name.
+
+They are worth looking at after any change to the row or band. One failure they show appears only at an extreme and is easy to miss: a destination collides with the time column when the board is *sparse* enough for rows to draw at full height, which is the opposite of where anyone looks for an overflow.
+
 Boards render at a fixed reference instant so the departure times stay consistent with the header. Append **`?now=live`** to render at the real clock instead — that is what exercises the timezone from config, and it is where a bad `Intl` part shows up in the header block.
 
 **Look at the image, not just the status code.** A textless render is a valid PNG of a plausible size, and a font that fails to load produces exactly that. More than one afternoon has gone to a 200 that drew nothing.

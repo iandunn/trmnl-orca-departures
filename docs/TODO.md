@@ -59,7 +59,9 @@ The `/api/log` payload is richer than the name suggests, so log every field rath
 
 The other half of the same window is free and easy to miss: the request headers already on every `/api/display` poll — `Battery-Voltage`, `FW-Version`, `Wake-Time`, `Update-Source`, `Width`/`Height`, plus the X's six extra battery headers. Those arrive whether or not the device ever logs, so log them too. The headers answer "did it wake, and what did it think it was doing"; `/api/log` answers "where did it fail". One caveat: `Image-Cached` reports the **previous** wake's outcome, so it is always a cycle stale.
 
-**2. Live OneBusAway data.** One fetch per stop; `references.routes` and `references.stops` ride along so no second call is needed. Dedup by `tripId`, drop anything already past, use `predictedArrivalTime` and fall back to `scheduledArrivalTime` with `live: false`. Map `route.type` to board mode — **0 is rail, 3 is bus; never match on the route name**, since RapidRide's `H Line` is a bus and would be drawn as rail. Take the "Updated at" timestamp from OBA's `currentTime`, not our own clock.
+**2. Live OneBusAway data.** One fetch per stop; `references.routes` and `references.stops` ride along so no second call is needed. Dedup by `tripId`, drop anything already past, use `predictedArrivalTime` and fall back to `scheduledArrivalTime` with `live: false`. Map `route.type` to board mode — **0 is rail, 3 is bus; never match on the route name**, since RapidRide's `H Line` is a bus and would be drawn as rail. Note the region also returns type `2` (Sounder, Amtrak) and type `4` (ferries), so the mode map needs a default rather than assuming 0 or 3.
+
+Take the destination from each arrival's **`tripHeadsign`**, never from `stopGroupings[].stopGroups[].name`. The group names look like headsigns and are not: OneBusAway disambiguates same-named groups by appending a counter, so route 125's two groups both come back as `Downtown Seattle South Seattle College - 0` and `- 1`. Drawing that on the panel would put a stray `- 0` on the sign. Take the "Updated at" timestamp from OBA's `currentTime`, not our own clock.
 
 Still open and genuinely undecided: where the recovery generation is stored, and how the "Updated at" stamp is sized (cannot be judged until the device arrives).
 
@@ -70,22 +72,6 @@ Try to do as many of these as possible. Don't do one if it'd overlap code with a
 - [ ] swap sound transit text for their logo when at a light rail stop
 	maybe use the icon+link from https://storage.ghost.io/c/19/31/1931222a-d1c5-42ac-8932-2ee3ac1f8927/content/images/old-theurbanist-org/wp-content/uploads/2019/11/new-totems.png
 	or use the logo from https://www.soundtransit.org/get-to-know-us/our-brand/logos
-
-
-## Want to do now
-
-- [ ] pick the best bus routes to demo
-	for nbound variant i want 13 to seattle center, d to ballard uptown
-	sbound i h to westwood village, 7 to rainer beach. want 125 to south seattle college and 50 would be nice but optional.
-	find me stops that meet those criteria or close. give me options if there are many
-	maybe stops 420 and 600 instead of 3rd/pine
-
-	**Session `36225e1a-cd8c-4ed8-81d0-32aace01555d` has the data already** — full Monday schedules with headsigns and trip counts for `1_590`, `1_430`, `1_600`, `1_420`, `40_621`, `40_623`, `40_1108`, `40_1121`. Resume it instead of re-querying; the `TEST` key is heavily rate-limited.
-	Answering the questions above from that data: **3rd Ave & Virginia St (`1_600` NW / `1_420` SE) is the better pair** — 21 routes each and all four RapidRide lines on both sides, versus 16/13 at Pine.
-	- `D Line` → Ballard Uptown and `13` → Seattle Pacific University Seattle Center W are both at **`1_600`** (northwest bound), so those two can share a board.
-	- `H Line` → Downtown Seattle Westwood Village is also at `1_600`. At `1_420` the H goes the other way, to Burien Transit Center Westwood Village.
-	- `7` → Rainier Beach Via Rainier Ave S is **not** at either Virginia stop; it is at `1_430` (3rd & Pine, southeast bound).
-	- **Route `125` does not serve any of these four stops.** South Seattle College is reachable from 3rd Ave but not from the stops looked up so far — needs its own lookup if you want it.
 
 
 ## High Priority
@@ -199,9 +185,9 @@ Try to do as many of these as possible. Don't do one if it'd overlap code with a
 
 - [ ] **Delete `.npm-cache/` when convenient.** 284 MB sitting in the project directory. Covered by `~/.gitignore_global` so it is harmless to git, and it only exists because `~/.npm/_cacache` is denied in the sandbox. Removing it just costs a slower next install.
 
-- [ ] **Shorten long headsigns.** Not blocking, but it is the biggest unsolved thing the real data turned up. Metro concatenates destination and via-point with no separator, so headsigns run long and repeat themselves: `Seattle Pacific University Downtown Seattle`, `Mount Baker Mount Baker Transit Center`, `Central District Downtown Seattle`, `Rainier Beach Via Rainier Ave S`, `Downtown Seattle Westwood Village`.
-	The mockups only fit because the samples were hand-shortened — `Mount Baker Mount Baker Transit Center` was cut to `Mount Baker Transit Center` by hand to make it fit, which is exactly the work the code will have to do.
-	**Plain truncation is not enough.** `Rainier Beach Via Rai…` is worse than useless. Wants a real rule — strip a trailing `Via …` clause, collapse a repeated leading token — with truncation only as the backstop. Consider measuring rendered width rather than counting characters, since the badge column is fixed and the time column is right-aligned.
+- [ ] **Shorten long headsigns — nothing overflows any more, so what is left is taste rather than a bug.** Two halves are done: `collapseRepeatedPhrases()` in `src/headsign.js` drops a stuttered phrase, and `destinationSize()` in `src/render/board.js` steps the type down so a long destination cannot reach the time column. `Pioneer Square Chinatown International District Waterfront`, the region's longest, now fits at every density.
+	What remains is that a shrunken row is visibly smaller than its neighbours, which is a legibility cost on the very row that is hardest to read. Options if it ever bothers: **stripping a trailing `Via …` clause** is tempting but loses real information — `Rainier Beach Via Rainier Ave S` and `Madrona and 34th Ave Via E Cherry St` both use it to distinguish a routing, and the owner wants the `Via` kept — and **truncation** would be worse: `Rainier Beach Via Rai…` is worse than useless.
+	If it is picked up, the honest improvement is **measuring rendered width instead of estimating it**. `AVERAGE_ADVANCE` in `render/board.js` is 0.5 per character, calibrated from one render at 0.46 and rounded up for slack, so every shrunken row is a few points smaller than it strictly needs to be. Real measurement means glyph metrics, which live in `render/index.js` with the font rather than in the pure layout module — a bigger change than it looks.
 
 - [ ] **Route filtering.** Explicitly **not needed** for the initial build — recorded so the reasoning is not relost. The chosen stop serves few enough routes that everything fits.
 	It would matter at a busy stop: 3rd Ave & Virginia St serves 21 routes per direction, and trip counts range from 1 a day (`24`, `27`) to 141 (`E Line`). A peak-only express that runs three times a day will almost never be in the next eight departures anyway, so sorting by time already filters most of the noise — an explicit allow/deny list is only worth it if a frequent route you never ride keeps crowding out one you do.

@@ -41,6 +41,8 @@ Every 8th render additionally gets the slow deep clear rather than the fast one 
 - `src/dev/preview.js` — the local contact sheet. **Gated on `DEV_PREVIEW`, which lives in `.dev.vars` and is therefore never deployed.**
 - `src/config.js` — `readConfig()`, the only reader of `env` for a display or scheduling value. Coerces and range-checks everything and never throws; secrets stay off it on purpose. Added 2026-08-01.
 - `src/clock.js` — `formatBoardTime( timestampMs, timezone )`, the header fields and the "Updated at" stamp. Pure, and takes the timestamp rather than reading a clock, because the stamp must come from OneBusAway's `currentTime`. Added 2026-08-01.
+- `src/headsign.js` — `collapseRepeatedPhrases()`, which drops one copy of a phrase repeated back to back. Called by the renderer rather than by a data mapper, so it applies to live predictions and fixtures alike. Added 2026-08-01.
+- `src/route-badge.js` — `routeBadge()`, which strips ` Line` from the 13 single-character lines so `D Line` badges as `D`. Same seam and same reason as the headsign collapse. Added 2026-08-01.
 - `src/filename.js`, `src/routing.js` — the cache key and path parsing, as before.
 - `src/gate.js` — the shell every request passes through. Returns either a finished `Response` or an authorized classification for a caller to dispatch on, which is the seam the BYOS handlers hang off. Added 2026-08-01.
 - `src/abuse.js` — `classifyRequest()`, `diagnosePath()`, the tarpit, and the `OUTCOMES` / `REJECTION_REASONS` vocabularies. Added 2026-08-01.
@@ -315,10 +317,15 @@ All verified live against OneBusAway. **Never use the stop this sign actually po
 
 | Pair | Stops | Name | Directions | Notes |
 | --- | --- | --- | --- | --- |
-| **Bus, default** | `1_590` / `1_430` | 3rd Ave & Pine St | `NW` / `SE` | 16 and 13 routes. The standard sample. |
-| **Bus, denser** | `1_600` / `1_420` | 3rd Ave & Virginia St | `NW` / `SE` | 21 routes each, all four RapidRide lines on both sides. Use when the layout needs stressing. |
+| **Bus, default** | `1_600` / `1_430` | 3rd Ave & Virginia St / 3rd Ave & Pine St | `NW` / `SE` | **Not a matched pair** — two stops 313 m apart, chosen independently. The standard sample; see below for why. |
+| Bus, matched pair | `1_590` / `1_430` | 3rd Ave & Pine St | `NW` / `SE` | 16 and 13 routes. The former default, kept for the two-sides-of-one-street case. |
+| Bus, denser | `1_600` / `1_420` | 3rd Ave & Virginia St | `NW` / `SE` | 21 routes each, all four RapidRide lines on both sides. Use when the layout needs stressing. |
 | **Light rail** | `40_621` / `40_623` | Int'l District/Chinatown | `N` / `S` | 1 Line and 2 Line. |
 | Light rail, alt | `40_1121` / `40_1108` | Westlake | `NE` / `SW` | Same two lines; ID/Chinatown is preferred. |
+
+**The default bus sample is deliberately two unrelated stops, decided 2026-08-01.** 3rd Ave interleaves two stop zones — the "south end" routes (`7`, `13`-downtown-only, `14`, `36`, `4`, `70`) call at Pine, Union, Marion and James, while the West Seattle and south-county routes (`H`, `C`, `21`, `125`, `124`, `131`, `132`) call at Pike, Seneca and Columbia. Verified against `stops-for-route` for all of them: **the `7` signed for Rainier Beach shares no stop anywhere in the system with `125`, `C`, or `H` signed for Burien**, and the `D` to Ballard overlaps it only at `1_515`, which has no same-named counterpart. So no matched pair can show both a southbound `7` → Rainier Beach and a northbound `D` → Ballard, and picking the two stops independently is the only way to demo both.
+
+That is a real configuration rather than a cheat: `/token/<token>/agency/1/stop/1_600,1_430` is two arbitrary stop IDs under one agency, which the URL shape already allows, and a sign serves whichever stops its owner actually walks to.
 
 **International District is the right rail sample, not Westlake.** It is where the two lines diverge, and northbound *both* lines show the identical destination "Lynnwood City Center" — so the line number is the only thing separating those rows. Any badge design has to survive that. Southbound splits properly: `1 Line` → Federal Way Downtown, `2 Line` → Downtown Redmond.
 
@@ -326,16 +333,40 @@ All verified live against OneBusAway. **Never use the stop this sign actually po
 
 Use real route numbers and headsigns in mockups. Invented ones hide width problems — `570` and `131` are wider than the `40` early renders were tuned against, and real headsigns are far longer than anything invented.
 
+**Fixtures keep the raw headsign; the renderer shortens it.** `collapseRepeatedPhrases()` in `src/headsign.js` drops one copy of a back-to-back repeat, so `Mount Baker Mount Baker Transit Center` draws as `Mount Baker Transit Center`. Metro concatenates destination with via-point and no separator, so the stutter is what OneBusAway actually returns — pre-shortening it in a fixture would hide the problem rather than solve it, which is what an earlier sample did.
+
+**Badges come from the API too, and `D Line` does not fit a 152px box.** `routeBadge()` in `src/route-badge.js` strips ` Line` when a single character precedes it — 13 routes region-wide, and they are the ones a Seattle sign is most likely to show: all eight RapidRide lines, both Link lines, Tacoma Link's `T Line` and both Sounder lines. None of those has a route number; the letter *is* the designation, and both agencies print it that way, so this matches their signage rather than inventing an abbreviation.
+
+**The badge slot holds an official designation or nothing** — a number, a number with an express suffix like Intercity Transit's `9X`, or a single letter. **Fitting is necessary but not sufficient**: `STCL` and `TA034` are short enough to draw and still do not belong there, because they read as internal codes rather than as the route a rider asks for. A route that fails the test gets a **blank slot**, and its name moves to the head of the destination instead — `Swift Blue: Shoreline North/185th Station`, `STCL: Stream TDS / Spanaway TC`, via `destinationWithRoute()`. The row is the only place with horizontal room, and the alternative was a row saying where a vehicle goes without saying which vehicle. A colon rather than a middle dot or em dash, so it survives font subsetting.
+
+The rejected alternatives, since each looks reasonable until measured: a font-size ladder reaches about five characters and does nothing for a thirty-character name; widening the badge breaks the fixed destination column that keeps rows aligned across modes; and initials would invent signage nobody prints, with three Sound Transit routes all named `Shuttle` colliding anyway.
+
+**The destination shrinks to fit rather than running into the time column, and the whole board shrinks together.** `destinationSize()` in `render/board.js` caps the type at the row's own scale and steps it down when the longest string on the board is too long for the space between the badge slot and the time. **Per board, not per row** — fitting each row independently puts two type sizes in one column, and that reads as a rendering fault rather than as a fit. The cost is that a short destination is drawn smaller because a different row is long. The failure it fixes is counter-intuitive and was invisible for a long time: `rowMetrics()` clamps rather than stretches, so a board with **two** departures draws them at full size and the region's longest headsign — `Pioneer Square Chinatown International District Waterfront` — ran straight through `4:47 pm`, while the same string on an eight-row board fitted comfortably. The overlap appeared when the sign had least on it.
+
+Nothing here can measure a string — resvg does the shaping and the font is only loaded in `render/index.js` — so the fit uses an average advance per character, calibrated against a render of that longest headsign at 0.46 and rounded up to 0.5 for slack. That is an estimate and is documented as one; it costs a slightly smaller size on the few rows that need shrinking and protects against wider letterforms than the string it was measured on.
+
+**A route with no short name at all falls back to its long name, but only when that is a service name.** 39 routes have no `shortName` — every Washington State Ferries route, and Amtrak Cascades. The split in `longName` is exact and worth knowing: Amtrak's is `Amtrak Cascades`, a service, so the row reads `Amtrak Cascades: Portland`; all 38 ferry routes are endpoint pairs like `Bainbridge Island - Seattle`, and prefixing one would produce `Bainbridge Island - Seattle: To Seattle`, restating the destination to say nothing. So a ferry row is a blank slot and a bare destination, which is accepted — a ferry has no route number, and `To Seattle` is verbatim what OneBusAway returns for that direction.
+
+Drawing the plate for a nameless route would put a black block where a number belongs, which reads as a rendering fault; the destination column is a fixed x, so a blank slot keeps every row aligned.
+
+**The awkward cases are all rendered side by side at `/_preview`**, built by `src/dev/edge-case-boards.js` — badge overflow in both bus and rail, the headsigns that must and must not collapse, the longest stop name, a stop with no compass bearing, and a sparse board at the row-height ceiling. Real names throughout; the co-location is synthetic and each group says so on itself.
+
+**The rule is adjacency, never word frequency, and that distinction is the whole design.** `Seattle Pacific University Seattle Center W` and `Rainier Beach Via Rainier Ave S` each repeat a word while naming two different places; collapsing either would destroy the destination rather than shorten it. Only an immediate repeat is a stutter. `src/headsign.test.js` pins every one of those live headsigns as unchanged, which is the regression guard for anything cleverer added later.
+
 Two reasons this is the standing choice, and both matter:
 
-- It is a **busy public downtown stop that reveals nothing** — the opposite of the stop this sign actually points at, which must never appear in a tracked file or a committed image.
-- It is a genuine **two-direction pair sharing one name**, which is exactly the case the layout has to solve. A single-stop sample would hide the problem.
+- They are **busy public downtown stops that reveal nothing** — the opposite of the stop this sign actually points at, which must never appear in a tracked file or a committed image.
+- They are genuinely **two stops on one board**, which is exactly the case the layout has to solve. A single-stop sample would hide the problem.
 
 Real routes there: northbound `H Line, 5, 17, 21, 24, 27, 28, 33, 40, 56, 57, 62, 124, 131, 132, 570`; southbound `1, 2, 3, 4, 7, 13, 14, 17, 36, 40, 62, 70, 570`. Use real route numbers and headsigns in mockups — invented ones hide width problems, and `570` / `131` are wider than the `40` that earlier renders were tuned against.
 
 #### Two stops on one board — the layout, variant 9
 
-`.claude/tmp/cpu-spike/variant-9-two-stops.png`. Since both stops carry the **same name**, the name goes in the footer once and the groups are separated by a **light grey band** holding the direction and the stop code. Four departures per direction, accepted 2026-08-01 after comparing against three — three left a visible dead band above the footer rule, and four fills the panel without the rows reading as cramped. The band is our invention — Metro's signs serve one stop, so they have no equivalent.
+`.claude/tmp/cpu-spike/variant-9-two-stops.png`. The groups are separated by a **light grey band** holding the direction, the stop name and the stop code. Four departures per direction, accepted 2026-08-01 after comparing against three — three left a visible dead band above the footer rule, and four fills the panel without the rows reading as cramped. The band is our invention — Metro's signs serve one stop, so they have no equivalent.
+
+**The stop name lives in the band, on every group, always — revised 2026-08-01.** It was in the footer once, which assumed a board is one street in both directions. That assumption does not hold: the two stops may be blocks apart and chosen independently, and even a true across-the-street pair can carry different names when the cross streets differ. So each band names its own stop, and a board whose groups happen to name the same one says it twice. The repetition is the point — the band is the single place a reader ever looks for the stop, rather than a place the name moves to depending on data the reader cannot see. The footer is now the "Updated at" stamp alone.
+
+Direction and name share one baseline through a `<tspan dx>` rather than a second `<text>` at a fixed x, because the name has to begin wherever the direction ends and text width is not knowable in `render/board.js` — the font is only loaded in `render/index.js`. **Spaces do not work for the gap**: SVG collapses runs of whitespace, so `"St   Stop No."` renders as `"St Stop No."` and the two read as one phrase. Verified by looking at the render, not by trusting a 200.
 
 **Row height is derived, not a constant — added 2026-08-01 when four rows landed.** `rowMetrics()` in `render/board.js` divides the space between the header and the footer rule by however many departures the board carries, and every size inside a row scales by that one factor. Three things about it are deliberate:
 
@@ -351,7 +382,7 @@ OneBusAway reports a compass bearing (`N`, `NE`, `NW`, …), never a word. The d
 
 **The four cardinals close up; the diagonals stay spaced.** Revised 2026-08-01, after the first pass emitted "North bound" for every cardinal. "Northbound" is the word, and it is what Metro prints, while "Northwestbound" is not a word anyone writes. This is a spelling rule, not a semantic one, and the payoff is that a plain north-south stop needs **no override at all** — which is what an override map should look like. `COMPASS_WORDS` in `render/board.js` now holds the full label per bearing rather than a stem plus a suffix.
 
-A small `DIRECTION_OVERRIDES` map, keyed by full OBA stop ID, replaces the label where the **bearing itself misleads** — 3rd Ave runs diagonally, so its stops report `NW`/`SE` while every rider and every Metro timetable says northbound (`1_590` → "Northbound"). Intended for a handful of personal stops. **Never a county-wide table** — that would defeat the point of deriving it.
+A small `DIRECTION_OVERRIDES` map, keyed by full OBA stop ID, replaces the label where the **bearing itself misleads** — 3rd Ave runs diagonally, so its stops report `NW`/`SE` while every rider and every Metro timetable says northbound (`1_600` → "Northbound"). Intended for a handful of personal stops. **Never a county-wide table** — that would defeat the point of deriving it.
 
 The deployment's map lives with the secrets, never in `[vars]`; the sample boards carry their own public one in `src/dev/sample-boards.js`. See `docs/deploying.md`.
 
@@ -447,7 +478,7 @@ https://<worker>/token/<token>/agency/<agency>/stop/<stopId>[,<stopId>]
 
 giving `/token/<token>/agency/<agency>/stop/<stopId>/api/display`. **Token first** so a bad token short-circuits before any parsing or upstream call. Compare in constant time, and give a bad token the same response as a bad path — byte-identical status, headers and body. **Timing is the one deliberate exception**, and only in one direction: see the tarpit rules below.
 
-**The stop segment is one or two comma-separated IDs — never more.** Two is the opposite-directions case (a street pair is two distinct OBA stop IDs under one agency); one is a single-direction sign. Reject three or more with the same response as any other bad path rather than truncating silently, and render in the order given. A comma is a legal unencoded sub-delimiter in a path segment, and OBA stop IDs never contain one, so no escaping is needed.
+**The stop segment is one or two comma-separated IDs — never more.** One is a single-direction sign; two is any two stops under that agency, which need not be a street pair. Opposite directions of one street is the common case, but two stops a few blocks apart is equally valid and is what the sample board uses — the layout names each stop in its own band rather than assuming they share one. Reject three or more with the same response as any other bad path rather than truncating silently, and render in the order given. A comma is a legal unencoded sub-delimiter in a path segment, and OBA stop IDs never contain one, so no escaping is needed.
 
 Labelled segments rather than the earlier `/t/<token>/s/<agency>_<stopId>`, for two reasons. It is legible when read off a captive-portal field on a phone, and it keeps the agency out of the stop segment — OneBusAway stop IDs are not opaque integers and routinely contain their own underscores and hyphens (`40_E15-T1`, `40_S_KS_T3`, `96_SCM`), so a single `<agency>_<stopId>` segment is a split waiting to be written wrong. Reassemble as `<agency>_<stopId>` only at the point the OBA URL is built.
 

@@ -8,6 +8,7 @@ import {
 	rowMetrics,
 } from './board.js';
 import { BUS_BOARD, RAIL_BOARD } from '../dev/sample-boards.js';
+import { collapseRepeatedPhrases } from '../headsign.js';
 
 describe( 'directionLabel', () => {
 	// Cardinals close up, because "Northbound" is the word Metro prints; diagonals stay spaced,
@@ -103,9 +104,87 @@ describe( 'buildBoardSvg', () => {
 			expect( svg ).toContain( group.stop );
 
 			for ( const row of group.rows ) {
-				expect( svg ).toContain( row.to );
+				expect( svg ).toContain( collapseRepeatedPhrases( row.to ) );
 			}
 		}
+	} );
+
+	// Applied here rather than in the data so it covers live predictions too, without the OneBusAway
+	// mapper having to remember. The fixture keeps the raw headsign, which is what the API returns.
+	it( 'collapses a stuttered headsign on the way to the panel', () => {
+		const svg = buildBoardSvg( BUS_BOARD );
+
+		expect( svg ).toContain( 'Mount Baker Transit Center' );
+		expect( svg ).not.toContain( 'Mount Baker Mount Baker' );
+	} );
+
+	// The collision only happens on a sparse board, because `rowMetrics()` clamps rather than
+	// stretches: two departures draw at full type size, and the region's longest headsign then runs
+	// into the time. A dense board scales the same string down on its own and needs no help.
+	describe( 'destination fitting', () => {
+		const LONGEST = 'Pioneer Square Chinatown International District Waterfront';
+
+		const sparseWith = ( to ) => ( {
+			...BUS_BOARD,
+			groups: [
+				{
+					heading: 'Northbound',
+					name: '3rd Ave & Pine St',
+					stop: 'Stop No. 430',
+					rows: [ { badge: '7', to, value: '4:47', unit: 'pm', live: true } ],
+				},
+			],
+		} );
+
+		it( 'shrinks a destination that would otherwise run into the time column', () => {
+			// The ceiling for a sparse row is 58; anything below it means the fit took over.
+			expect( buildBoardSvg( sparseWith( LONGEST ) ) ).toContain( 'font-size="46"' );
+			expect( buildBoardSvg( sparseWith( LONGEST ) ) ).not.toContain( `font-size="58">${ LONGEST }` );
+		} );
+
+		// Two type sizes in one destination column read as a rendering fault rather than as a fit, so
+		// the longest destination sets the size for every row on the board.
+		it( 'sizes every row alike, not each row to its own length', () => {
+			const board = {
+				...BUS_BOARD,
+				groups: [
+					{
+						heading: 'Northbound',
+						name: '3rd Ave & Pine St',
+						stop: 'Stop No. 430',
+						rows: [
+							{ badge: '7', to: LONGEST, value: '4:47', unit: 'pm', live: true },
+							{ badge: '13', to: 'Ballard Uptown', value: '11', unit: 'min', live: true },
+						],
+					},
+				],
+			};
+			const sizes = [ ...buildBoardSvg( board ).matchAll( /font-size="(\d+)" fill="#111">(?!Now|\d)/g ) ];
+
+			expect( sizes.length ).toBeGreaterThan( 1 );
+			expect( new Set( sizes.map( ( match ) => match[ 1 ] ) ).size ).toBe( 1 );
+		} );
+
+		it( 'leaves a destination that already fits at full size', () => {
+			expect( buildBoardSvg( sparseWith( 'Ballard Uptown' ) ) ).toContain(
+				'font-size="58" fill="#111">Ballard Uptown'
+			);
+		} );
+
+		// A dense board has already scaled the type down past what the longest headsign needs, so the
+		// fit must not shrink it a second time.
+		it( 'does not shrink twice on a dense board', () => {
+			expect( buildBoardSvg( BUS_BOARD ) ).toContain( 'font-size="47" fill="#111">Rainier Beach' );
+		} );
+	} );
+
+	// Same seam, same reason: the fixture carries `D Line` because that is what OneBusAway returns,
+	// and the badge slot is far too narrow for it.
+	it( 'badges a named line by its letter alone', () => {
+		expect( buildBoardSvg( BUS_BOARD ) ).not.toContain( '>D Line<' );
+		expect( buildBoardSvg( BUS_BOARD ) ).toContain( '>D<' );
+		expect( buildBoardSvg( RAIL_BOARD ) ).not.toContain( '>1 Line<' );
+		expect( buildBoardSvg( RAIL_BOARD ) ).toContain( '>1<' );
 	} );
 
 	it( 'labels only the scheduled rows', () => {
@@ -131,6 +210,27 @@ describe( 'buildBoardSvg', () => {
 			expect( buildBoardSvg( BUS_BOARD ) ).not.toContain( '<circle' );
 		} );
 
+		// A ferry or Amtrak arrival has no route number at all. An empty black plate would read as a
+		// rendering fault, and the destination column is a fixed x, so leaving the slot blank costs
+		// nothing in alignment.
+		it( 'leaves the slot blank for a route with no short name, without moving the destination', () => {
+			const board = {
+				...BUS_BOARD,
+				groups: [
+					{
+						heading: 'Westbound',
+						name: 'Colman Dock',
+						stop: 'Stop No. 1',
+						rows: [ { badge: '', to: 'To Seattle', value: '4', unit: 'min', live: true } ],
+					},
+				],
+			};
+			const svg = buildBoardSvg( board );
+
+			expect( svg ).not.toContain( '<rect x="60"' );
+			expect( svg ).toContain( '<text x="252"' );
+		} );
+
 		it( 'uses circles for light rail', () => {
 			// The only thing separating northbound rows at Int'l District is the line number, so
 			// the badge has to carry the distinction on its own.
@@ -154,14 +254,66 @@ describe( 'buildBoardSvg', () => {
 		} );
 	} );
 
+	describe( 'direction bands', () => {
+		it( 'names each stop in its own band', () => {
+			const svg = buildBoardSvg( BUS_BOARD );
+
+			expect( svg ).toContain( '3rd Ave &amp; Virginia St' );
+			expect( svg ).toContain( '3rd Ave &amp; Pine St' );
+		} );
+
+		// The whole point of moving the name into the band: two stops on one board need not share a
+		// name, so the reader must never have to infer which group a single footer name belonged to.
+		it( 'repeats a shared name rather than hoisting it out of the bands', () => {
+			const names = buildBoardSvg( RAIL_BOARD ).match( /Int'l District\/Chinatown/g ) ?? [];
+
+			expect( names ).toHaveLength( 2 );
+		} );
+
+		// A `dx` rather than spaces, because SVG collapses whitespace and direction and name would
+		// otherwise read as one phrase.
+		it( 'separates the name from the direction without relying on spaces', () => {
+			expect( buildBoardSvg( BUS_BOARD ) ).toContain( '<tspan dx="26"' );
+		} );
+
+		it( 'leaves the footer to the stamp alone', () => {
+			const footer = buildBoardSvg( BUS_BOARD ).split( 'Updated at' )[ 1 ];
+
+			expect( footer ).not.toContain( 'Virginia' );
+			expect( footer ).not.toContain( 'Pine' );
+		} );
+
+		// OneBusAway leaves `stop.direction` empty often enough to matter — 24 of 515 stops surveyed,
+		// one of them a Link platform — and the name must not sit indented behind an empty label.
+		it( 'gives the name the whole slot when the stop reports no bearing', () => {
+			const svg = buildBoardSvg( {
+				...BUS_BOARD,
+				groups: [ { ...BUS_BOARD.groups[ 0 ], heading: '' } ],
+			} );
+
+			expect( svg ).toContain( '3rd Ave &amp; Virginia St' );
+			expect( svg ).not.toContain( '<tspan dx="26"' );
+		} );
+
+		it( 'still draws a band for a group with no name', () => {
+			const svg = buildBoardSvg( {
+				...BUS_BOARD,
+				groups: [ { ...BUS_BOARD.groups[ 0 ], name: undefined } ],
+			} );
+
+			expect( svg ).toContain( 'NORTHBOUND' );
+			expect( svg ).toContain( 'Stop No. 600' );
+		} );
+	} );
+
 	describe( 'escaping', () => {
 		it( 'escapes ampersands in a stop name', () => {
 			// Cross-street names contain `&` constantly and headsigns come from an upstream API,
 			// so unescaped text would produce invalid SVG that resvg rejects outright.
-			const svg = buildBoardSvg( { ...BUS_BOARD, stopName: '3rd Ave & Pine St' } );
+			const svg = buildBoardSvg( BUS_BOARD );
 
-			expect( svg ).toContain( '3rd Ave &amp; Pine St' );
-			expect( svg ).not.toContain( '3rd Ave & Pine St' );
+			expect( svg ).toContain( '3rd Ave &amp; Virginia St' );
+			expect( svg ).not.toContain( '3rd Ave & Virginia St' );
 		} );
 
 		it( 'escapes angle brackets in a headsign', () => {

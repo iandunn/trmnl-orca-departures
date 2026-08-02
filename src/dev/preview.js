@@ -12,6 +12,7 @@
 import { readConfig } from '../config.js';
 import { renderBoard } from '../render/index.js';
 import { buildMockStatsData, renderStatsHtml } from '../stats/render.js';
+import { edgeCaseBoards } from './edge-case-boards.js';
 import { sampleBoards } from './sample-boards.js';
 
 const PREVIEW_PREFIX = '/_preview';
@@ -107,7 +108,11 @@ export async function handlePreview( request, env ) {
 	// The timezone comes from real config, so the header block and the "Updated at" stamp are produced by
 	// the same path the device will get rather than by a fixture string.
 	const { timezone } = readConfig( env );
-	const boards = sampleBoards( { nowMs: requestedTime( url ), timezone } );
+	const at = { nowMs: requestedTime( url ), timezone };
+
+	// The reference boards first, then the stress sheet. Both render through the same path the device
+	// gets; the edge cases say on themselves that they are not real stops.
+	const boards = [ ...sampleBoards( at ), ...edgeCaseBoards( at ) ];
 
 	if ( pathname === PREVIEW_PREFIX || pathname === `${ PREVIEW_PREFIX }/` ) {
 		return new Response( contactSheet( boards, url.searchParams.get( 'now' ) ), {
