@@ -19,6 +19,16 @@ It runs entirely serverless on a free Cloudflare Worker. Nothing runs on your ho
 - **[Development](docs/development.md)** — working on the code: local dev, the design preview, what lives where, and the firmware traps that fail silently.
 - **[Manual testing](docs/manual-testing.md)** — driving the device's four requests by hand with `curl`, and what to check in each response.
 
+
+## Not affiliated with any of the organizations it mentions
+
+This is an independent personal project. It is **not** affiliated with, endorsed by, sponsored by, or in any way connected to King County Metro, Sound Transit, Connectpoint, OneBusAway, TRMNL, or Cloudflare. Nothing here is an official product of any transit agency or vendor.
+
+All trademarks, logos and brand marks belong to their respective owners. Agency artwork appears here only to identify the services being displayed and to imitate the look of a real stop sign — not to suggest either agency produced or approved this.
+
+Departure times come from OneBusAway's public API and are provided as-is. They can be wrong, stale, or missing, and this sign adds its own failure modes on top.
+
+
 ## License
 
 GPL v2 or later.

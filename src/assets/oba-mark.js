@@ -8,7 +8,7 @@
  * while windows end dark — a naive black->white then white->dark pair flattens both to one colour
  * and the windows dissolve into the body.
  *
- * Source: OneBusAway_Logo_Vehicles_Only.svg (see assets/sources/oba-mark/).
+ * Source: assets/sources/one-bus-away-logos/onebusaway-vehicles-only.svg.
  */
 
 /** All three vehicles, light-on-dark. Bounds within the source page. */

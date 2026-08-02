@@ -11,14 +11,19 @@
  * `assets/sources/connectpoint-photos/`. Every photo carries the current time in its header, so
  * each row is a data point:
  *
- * | Photo                     | Header  | Largest `N min` | Smallest clock time |
- * | ------------------------- | ------- | --------------- | ------------------- |
- * | `7214b1e1…`               | 6:52 am | 9 min           | —                   |
- * | `Screenshot …12.12.38 AM` | 4:11 pm | 8 min           | —                   |
- * | `0358e155…`               | 6:50 am | 8 min           | 7:03 am (13 min)    |
- * | `Screenshot …12.12.28 AM` | 3:51 pm | 7 min           | 4:03 pm (12 min)    |
- * | `Screenshot …12.12.14 AM` | 5:03 pm | 2 min           | 5:14 pm (11 min)    |
- * | `King-County-Metro-Blog`  | 4:07 pm | 4 min           | 4:26 pm (19 min)    |
+ * | Photo                           | Header  | Largest `N min` | Smallest clock time |
+ * | ------------------------------- | ------- | --------------- | ------------------- |
+ * | `connectpoint-0652am`           | 6:52 am | 9 min           | —                   |
+ * | `connectpoint-0411pm`           | 4:11 pm | 8 min           | —                   |
+ * | `connectpoint-0650am`           | 6:50 am | 8 min           | 7:03 am (13 min)    |
+ * | (not kept)                      | 3:51 pm | 7 min           | 4:03 pm (12 min)    |
+ * | (not kept)                      | 5:03 pm | 2 min           | 5:14 pm (11 min)    |
+ * | `connectpoint-0407pm-blog`      | 4:07 pm | 4 min           | 4:26 pm (19 min)    |
+ * | `connectpoint-0250pm-rapidride` | 2:50 pm | 5 min           | 3:10 pm (20 min)    |
+ *
+ * The two "not kept" photos are no longer in the folder, including the 5:03 pm one carrying the
+ * 11 min reading that fixes the top of the ladder. The readings were taken while they were, and
+ * `CLAUDE.md` holds the same table — their absence is not a reason to re-derive the thresholds.
  *
  * So the real sign counts minutes up to at least 9 and is showing clock times by 11. The owner's
  * call resolved the unobserved boundary: **10 counts, 11 does not.**

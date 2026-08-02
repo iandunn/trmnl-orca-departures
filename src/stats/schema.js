@@ -38,6 +38,54 @@
 export const ABSENT_NUMBER = -1;
 
 /**
+ * Analytics Engine's hard per-row ceiling: twenty blobs, twenty doubles, one index.
+ *
+ * **This is a fixed number of slots, not a schema that grows with what you write.** `SELECT *` on a
+ * dataset returns `double1` through `double20` even where only ten have ever been written, because
+ * the columns are the storage shape rather than a record of past calls. A row handed more than
+ * twenty of either is **rejected whole** — not truncated to the first twenty — so one field past the
+ * line costs every field on the row.
+ *
+ * That failure is silent from both ends. `recordRequest()` swallows write errors by design, and a
+ * query for the missing column comes back `unknown column: "blob21"`, which reads like a bad query
+ * rather than like a dataset that has stopped accepting rows. It cost this project a full deploy
+ * cycle of recording nothing at all on 2026-08-02, with 739 tests green throughout.
+ *
+ * Hence `assertWithinLimits()` below, called at module load in every file that defines a dataset
+ * schema. A test would pin today's list; a load-time throw is what stops the same mistake in a
+ * dataset added later, and it cannot be swallowed by the write path's catch.
+ */
+export const MAX_BLOBS = 20;
+export const MAX_DOUBLES = 20;
+
+/**
+ * Fails at import when a schema is over the ceiling.
+ *
+ * Deliberately a throw rather than a warning: an over-long schema does not degrade, it drops every
+ * row, so there is no partial-credit state worth continuing into. `npm test`, `npm run lint` and
+ * `wrangler deploy --dry-run` all import these modules, so all three catch it before a deploy does.
+ *
+ * @param {string}   dataset  Named in the message, since three files call this.
+ * @param {object[]} blobs
+ * @param {object[]} doubles
+ */
+export function assertWithinLimits( dataset, blobs, doubles ) {
+	if ( blobs.length > MAX_BLOBS ) {
+		throw new RangeError(
+			`${ dataset } declares ${ blobs.length } blobs; Analytics Engine accepts ${ MAX_BLOBS } and ` +
+				'rejects the whole row past that. Move a field to its own dataset rather than dropping the guard.'
+		);
+	}
+
+	if ( doubles.length > MAX_DOUBLES ) {
+		throw new RangeError(
+			`${ dataset } declares ${ doubles.length } doubles; Analytics Engine accepts ${ MAX_DOUBLES } and ` +
+				'rejects the whole row past that. Move a field to its own dataset rather than dropping the guard.'
+		);
+	}
+}
+
+/**
  * Caps on the strings that come from outside, applied as both a character and a byte limit — see
  * `clampBytes`. Analytics Engine bounds the total bytes of all blobs in a row, so the long free-text
  * fields are clipped rather than trusted; the rest are short by nature and capped only against a
@@ -51,6 +99,21 @@ const MAX_SHORT_BLOB_LENGTH = 64;
  *
  * `long: true` marks a field allowed the full length; everything else is clipped short, since the
  * only fields that legitimately run long are the ones a caller controls.
+ *
+ * ## Why this list once ran to 28 and was cut back, which is not a violation of the rule above
+ *
+ * Eight fields were appended here on 2026-08-02 — `upstreamReason` and seven device columns — taking
+ * the list to 28 against Analytics Engine's ceiling of 20. Every row written from that deploy was
+ * **rejected whole**, so the dataset never gained a `blob21` and no query could ever have read one.
+ *
+ * Removing them was therefore a deletion of slots with **no history behind them**, which is a
+ * different act from the reorder the append-only rule forbids: nothing was reinterpreted, because
+ * nothing was ever stored. `blob1` through `blob20` below are byte-for-byte what they have always
+ * been, and that is what makes the cut safe.
+ *
+ * The eight now live in `./device-telemetry.js`, which is the right home for them anyway — they
+ * describe a device rather than a request, and they are empty on the scanner traffic that makes up
+ * most rows here.
  */
 export const BLOB_FIELDS = [
 	{ name: 'outcome' },
@@ -83,49 +146,6 @@ export const BLOB_FIELDS = [
 	 * that states the fact outright cannot drift.
 	 */
 	{ name: 'authorized' },
-
-	/**
-	 * Why OneBusAway did not answer, on a poll where it did not.
-	 *
-	 * `filenameTag` already says a poll ended in `obafail`, which is *that* it failed and never *why*
-	 * — and the difference is the whole diagnosis. A `429` means the API key is rate-limited, which is
-	 * a key problem with a known fix; a `timeout` means the upstream is slow, which is not. Those
-	 * looked identical on this page until 2026-08-01, and the shared `TEST` key 429s constantly, so
-	 * the common case was the one being hidden.
-	 *
-	 * Carries an HTTP status when there is one (`http-429`), the reason slug otherwise. Empty on a
-	 * poll where every stop answered, and on every request that is not a poll.
-	 *
-	 * **Partial failures are recorded too.** One stop answering is enough for a board, so those never
-	 * reach `obafail` and would otherwise be invisible — which is exactly the shape a quota problem
-	 * takes as it starts.
-	 */
-	{ name: 'upstreamReason' },
-
-	/**
-	 * The device's own identity and the rest of its telemetry, appended 2026-08-02 for the per-device
-	 * panels on `/stats`.
-	 *
-	 * **`deviceId` is the MAC address, from the `ID` header, and it is the only stable per-device key
-	 * there is.** Everything else the firmware sends describes a *kind* of device — model, geometry,
-	 * firmware build — so two identical signs were previously indistinguishable in this dataset. That
-	 * is exactly the case the device-identity alarms exist to catch, and they were inferring it from
-	 * network and firmware counts because there was nothing better to group on.
-	 *
-	 * There is no serial number. The firmware sends none, so the MAC is what stands in for one.
-	 *
-	 * `clientIp` is recorded by the same decision that records stop IDs raw: on a single-device sign
-	 * the address is a constant, and a constant is what makes a deviation legible. Cloudflare's own
-	 * request logs hold it regardless. It does mean a screenshot of `/stats` now carries an IP as well
-	 * as roughly a home address — the page already says so about the stop.
-	 */
-	{ name: 'deviceId' },
-	{ name: 'clientIp' },
-	{ name: 'wifiBand' },
-	{ name: 'firmwareCommit' },
-	{ name: 'batteryCharging' },
-	{ name: 'usbConnected' },
-	{ name: 'temperatureProfile' },
 ];
 
 /**
@@ -148,6 +168,8 @@ export const DOUBLE_FIELDS = [
 	{ name: 'height' },
 	{ name: 'signalStrength' },
 ];
+
+assertWithinLimits( 'The request schema', BLOB_FIELDS, DOUBLE_FIELDS );
 
 const blobIndex = new Map( BLOB_FIELDS.map( ( field, index ) => [ field.name, index + 1 ] ) );
 const doubleIndex = new Map( DOUBLE_FIELDS.map( ( field, index ) => [ field.name, index + 1 ] ) );
@@ -308,15 +330,6 @@ const TEXT_HEADERS = {
 	'Update-Source': 'updateSource',
 	'Wake-Time': 'wakeTime',
 	'Battery-Capacity': 'batteryCapacity',
-
-	// `ID` is the MAC address. Undocumented in the reference field list and read straight out of
-	// `buildDisplayHeaders()` in the firmware, along with the four below it.
-	ID: 'deviceId',
-	'WiFi-Band': 'wifiBand',
-	'FW-Commit': 'firmwareCommit',
-	'Battery-Charging': 'batteryCharging',
-	'USB-Connected': 'usbConnected',
-	'Temperature-Profile': 'temperatureProfile',
 };
 
 /**
@@ -342,13 +355,7 @@ function pathOf( request ) {
 	}
 }
 
-export function eventFromRequest( {
-	request,
-	classification,
-	tokenHash = '',
-	filenameTag = '',
-	upstreamReason = '',
-} ) {
+export function eventFromRequest( { request, classification, tokenHash = '', filenameTag = '' } ) {
 	const headers = request?.headers;
 	const cf = request?.cf ?? {};
 	const parsed = classification?.parsed;
@@ -361,7 +368,6 @@ export function eventFromRequest( {
 		stopIds: parsed?.stopIds?.join( ',' ),
 		tokenHash,
 		filenameTag,
-		upstreamReason,
 
 		// Recorded only when the caller did not authenticate. An authenticated path carries the live
 		// shared secret in a segment, so it must never be written down even in filtered form.
@@ -372,10 +378,6 @@ export function eventFromRequest( {
 		networkOrganization: cf.asOrganization,
 		httpProtocol: cf.httpProtocol,
 		userAgent: headers?.get( 'User-Agent' ),
-
-		// Cloudflare's own header, not the device's — the firmware has no idea what its public address
-		// is. Recorded for the same reason as the network columns beside it.
-		clientIp: headers?.get( 'CF-Connecting-IP' ),
 	};
 
 	for ( const [ header, name ] of Object.entries( TEXT_HEADERS ) ) {
