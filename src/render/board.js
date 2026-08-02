@@ -135,14 +135,14 @@ export function directionLabel( bearing, stopId, overrides = {} ) {
 }
 
 /** SVG text is markup, and headsigns come from an upstream API. */
-function escapeText( value ) {
+export function escapeText( value ) {
 	return String( value )
 		.replace( /&/g, '&amp;' )
 		.replace( /</g, '&lt;' )
 		.replace( />/g, '&gt;' );
 }
 
-function text( x, y, size, content, { weight = 700, fill = INK, anchor, spacing } = {} ) {
+export function text( x, y, size, content, { weight = 700, fill = INK, anchor, spacing } = {} ) {
 	return (
 		`<text x="${ x }" y="${ y }" font-family="${ SIGN_FONT }" font-weight="${ weight }" font-size="${ size }" fill="${ fill }"` +
 		( anchor ? ` text-anchor="${ anchor }"` : '' ) +

@@ -22,7 +22,11 @@ Every script that *does* touch the account — `deploy`, `tail`, `whoami`, `secr
 
 So the split is by whether a command reaches the account, not by tidiness. `npm run secret:list` is the check that proves credentials resolve correctly; `npm run whoami` does **not**, because it only lists the accounts a token can reach and passes even when an operation would target a different one.
 
-Every BYOS endpoint currently answers **404 on purpose**, so `npm run dev` returning 404 on `/api/display` is correct rather than broken. A partial `/api/display` is worse than none: a response missing `refresh_rate` parses as `0` and hot-loops the device until the battery is flat, and a body of `{"status": 500}` factory-resets it. The endpoint only becomes safe once `refresh_rate`, `filename` and `status: 0` are all correct together.
+All four device routes are implemented, and they went in as one change rather than one at a time. A partial `/api/display` is worse than none: a response missing `refresh_rate` parses as `0` and hot-loops the device until the battery is flat, and a body of `{"status": 500}` factory-resets it. That rule still governs edits — the endpoint is only correct while `refresh_rate`, `filename` and `status: 0` are all right *together*, so never change one without checking the other two, and never let a code path return early without a `refresh_rate`.
+
+They do not show departures yet. OneBusAway is the next piece; until then a valid poll serves the "No departure data" notice screen.
+
+**The stop appears on the glass.** The notice screen prints the stop IDs in its footer, which is right for the owner's own sign and is why nothing renders a notice into a committed asset — the design preview builds only the sample boards, whose stops are public downtown ones chosen precisely so they can be written down. Keep it that way if you add a preview for the degraded screens.
 
 ## What lives where
 
@@ -32,17 +36,27 @@ Every BYOS endpoint currently answers **404 on purpose**, so `npm run dev` retur
 | `src/gate.js` | The shell every request passes through. Returns a finished response, or an authorized classification to dispatch on. |
 | `src/abuse.js` | Request classification, the bot tarpit, and the outcome vocabulary. |
 | `src/stats/` | The `/stats` page: `schema.js` (the Analytics Engine row), `analytics.js` (writes), `device-logs.js` (`/api/log` history), `query.js` (SQL reads), `render.js` (pure HTML), `handler.js` (auth). |
+| `src/byos/index.js` | Dispatch for the four device routes, on the gate's classification. |
+| `src/byos/setup.js` | `/api/setup` — enrollment. The one endpoint whose body needs `status: 200`. |
+| `src/byos/display.js` | `/api/display` — chooses the screen, builds the `filename` and the `refresh_rate`. |
+| `src/byos/image.js` | `/image/<filename>` — the PNG bytes, at exactly `image/png`. |
+| `src/byos/log.js` | `/api/log` — the device's own diagnostics. Always `204`. |
+| `src/byos/credentials.js` | Derives the `api_key` and `friendly_id` from the shared secret. No storage. |
+| `src/byos/screens.js` | Which screen to draw for each state, and its `FILENAME_TAGS` tag. |
 | `src/config.js` | `readConfig()` — the only reader of `env` for a display or scheduling value. |
 | `src/clock.js` | `formatBoardTime()` — the header fields and the "Updated at" stamp, in the configured timezone. |
 | `src/routing.js` | Path parsing and the constant-time token comparison. |
 | `src/filename.js` | The content-hash cache key the device caches images by. |
 | `src/render/board.js` | The board as SVG, data-driven. Pure. |
+| `src/render/notice.js` | The degraded screen, as SVG. Deliberately not shaped like the board. Pure. |
 | `src/render/png.js` | Quantise and 4-bit greyscale PNG encoder. Pure. |
 | `src/render/index.js` | resvg wiring — the only module that touches wasm or fonts. |
 | `src/assets/` | Logos, pre-cleaned and pre-recoloured at author time so nothing is reprocessed per render. |
-| `src/dev/` | The sample boards and the preview page. |
+| `src/dev/` | The sample boards, the preview page, and the BYOS self-check (`byos-check.js` runs it, `byos-page.js` renders it). |
 
-Tests sit beside the file they cover. `vitest.config.js` aliases `.wasm` and `.ttf` to a stub, because vitest tries to parse binary modules as JavaScript; nothing that depends on those contents is asserted.
+Tests sit beside the file they cover. `vitest.config.js` aliases `.wasm` and `.ttf` to a stub, because vitest tries to parse binary modules as JavaScript; nothing that depends on those contents is asserted. That is also why anything which actually rasterises — the image route, the preview — is exercised against a running `wrangler dev` rather than in a unit test.
+
+**A worktree under `.claude/worktrees/` cannot run `wrangler dev` as-is.** `src/render/index.js` imports the wasm and the fonts by relative path into `node_modules/`, and a linked worktree has none of its own, so the build fails with `ENOENT` on the font. `npm test` and `npm run lint` are fine — npm walks up to the parent checkout's `node_modules` for both the binaries and the bare imports. To rasterise from a worktree, temporarily point those three imports at the parent checkout's absolute path and put them back afterwards.
 
 ## Design preview
 
@@ -68,6 +82,16 @@ The same flag serves the stats page against mock data at **http://localhost:8788
 
 **Escaping is not optional in that file.** It renders user agents and probe paths straight from whoever sent them. `src/dev/preview.js` builds its HTML without escaping because its inputs are fixtures; the stats page cannot follow that precedent, and `render.test.js` asserts it does not.
 
+## BYOS self-check
+
+Also behind the same flag: **http://localhost:8788/_preview/byos** drives all four device routes and asserts the contract on each, so the endpoints can be exercised by reloading a page instead of pasting a dozen `curl` commands.
+
+**Every assertion on it is a silent-failure mode.** That is the reason it exists rather than being left to the test suite: the firmware swallows PNG decode errors, discards any response whose `status` it does not recognise, and hot-loops on a missing `refresh_rate` — so the symptom of getting one wrong is a blank or frozen panel with nothing in any log. Each row says what is being checked *and why*, and the page renders every screen the sign can currently draw so you are looking at pixels rather than status codes. It also names the `FILENAME_TAGS` entries that are not buildable yet, so the set can be checked for completeness at a glance.
+
+**The checks run server-side, and that is deliberate.** Driving them from browser `fetch()` would mean embedding the device token in a page, and the whole access design rests on that string never leaving `.dev.vars` and device NVS. So the Worker calls its own `gate()` → `dispatchByos()` pipeline directly and inlines the rendered PNGs as data URIs. `src/dev/byos-check.js` runs the checks; `src/dev/byos-page.js` renders them and is pure, so the layout is testable without a Worker.
+
+Two limits worth knowing. It composes `gate()` and `dispatchByos()` the way `src/worker.js` does rather than importing the worker — importing it would be a cycle — so it covers the whole device request path but not that those two are wired together correctly, which is what `src/worker.test.js` is for. And it disables the tarpit for the run, because one check requests an unshaped path deliberately and at the real 25 seconds the page would look hung.
+
 ## Reading the device's logs
 
 The device POSTs its own diagnostics to `/api/log`, and that is the **only** channel back from it — there is no push channel, so a device that renders nothing cannot be prodded, and the firmware tracks no staleness of any kind. Three of its failure paths (malformed body, wrong `Content-Type`, out of memory) draw nothing at all and then settle into 900-second polls, so a blank panel may be the only symptom you ever see.
@@ -80,13 +104,15 @@ npm run tail          # live stream from the deployed Worker
 
 `wrangler tail` is live-only — it shows requests as they happen and nothing from before you attached. That is the right tool when you are standing at the sign with a USB cable. The Cloudflare dashboard's **Workers Logs** view covers the recent past, because `[observability.logs]` is enabled in `wrangler.toml`, but retention there is **3 days on the Free plan** (7 on Paid).
 
-For history, `recordDeviceLogs()` in `src/stats/device-logs.js` writes every entry to its own Analytics Engine dataset, and the **Device logs** panel on `/stats` reads it back with roughly 90 days of retention. Three reasons that is not redundant with the console:
+For history, `recordDeviceLogs()` in `src/stats/device-logs.js` writes every entry to its own Analytics Engine dataset, and the **Device logs** panel on `/stats` reads it back with roughly 90 days of retention. `/api/log` calls it directly. Three reasons that is not redundant with the console:
 
 - The entries that matter arrive **during a failure**, which is exactly when nobody is watching a tail.
 - It sits in the same store as the request outcomes, so the device's own account of a failure can be read against what the server was answering at the time. Workers Logs cannot be joined against that.
 - 3 days is thinner than it sounds for a wall-mounted object. A sign that misbehaves while you are away is a week gone.
 
 The dataset keeps `source_path` and `source_line` — together they name the exact line of the GPLv3 firmware that produced the entry, rather than a guess — plus `free_heap_size` and `max_alloc_size`, which are the only signal for the out-of-memory path. One request is capped at 64 persisted entries so a misbehaving device cannot spend the daily write quota; anything dropped is counted rather than discarded silently.
+
+`/api/display` and `/image` feed the same history from the other side, recording the `FILENAME_TAGS` tag of the screen they served. That is what answers "what was actually on the glass at 3am", which neither the console nor the device can tell you.
 
 Both `npm run tail` and `npm run deploy` need Cloudflare credentials in the environment, which is still an open question — `.cloudflare.env` holds them and nothing loads it yet.
 

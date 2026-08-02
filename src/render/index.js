@@ -17,6 +17,7 @@ import resvgWasm from '../../node_modules/@resvg/resvg-wasm/index_bg.wasm';
 import firaSansRegular from '../../node_modules/@expo-google-fonts/fira-sans/400Regular/FiraSans_400Regular.ttf';
 import firaSansBold from '../../node_modules/@expo-google-fonts/fira-sans/700Bold/FiraSans_700Bold.ttf';
 import { PANEL_HEIGHT, PANEL_WIDTH, SIGN_FONT, buildBoardSvg } from './board.js';
+import { buildNoticeSvg } from './notice.js';
 import { encodeGreyscalePng } from './png.js';
 
 let wasmReady;
@@ -50,6 +51,14 @@ export async function rasterize( svg ) {
  */
 export async function renderBoard( board ) {
 	return rasterize( buildBoardSvg( board ) );
+}
+
+/**
+ * @param {import('./notice.js').Notice} notice
+ * @returns {Promise<Uint8Array>}
+ */
+export async function renderNotice( notice ) {
+	return rasterize( buildNoticeSvg( notice ) );
 }
 
 /**

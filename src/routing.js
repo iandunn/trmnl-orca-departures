@@ -138,6 +138,11 @@ function parseStopIds( segment ) {
  * @property {string}   token
  * @property {string}   agency     Numeric agency ID, e.g. `1` for King County Metro.
  * @property {string[]} stopIds    One or two bare stop IDs, without the agency prefix.
+ * @property {string}   basePath   The device's base URL path, with no trailing slash. Built from the
+ *                                 **raw** segments rather than the decoded ones, because the
+ *                                 firmware authenticates an image URL with a raw `strncmp` against
+ *                                 the base URL it stored — a re-encoded prefix silently loses the
+ *                                 `Access-Token` on the image request.
  * @property {string}   route      One of `ROUTES`.
  * @property {string}   [filename] Present only for the image route.
  */
@@ -171,15 +176,16 @@ export function parsePath( pathname ) {
 		return null;
 	}
 
+	const basePath = `/${ segments.slice( 0, 6 ).join( '/' ) }`;
 	const rest = segments.slice( 6 );
 	const route = rest.join( '/' );
 
 	if ( route === ROUTES.setup || route === ROUTES.display || route === ROUTES.log ) {
-		return { token, agency, stopIds, route };
+		return { token, agency, stopIds, basePath, route };
 	}
 
 	if ( rest[ 0 ] === ROUTES.image && rest.length === 2 ) {
-		return { token, agency, stopIds, route: ROUTES.image, filename: rest[ 1 ] };
+		return { token, agency, stopIds, basePath, route: ROUTES.image, filename: rest[ 1 ] };
 	}
 
 	return null;

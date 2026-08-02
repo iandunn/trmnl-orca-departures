@@ -70,10 +70,17 @@ export const OUTCOMES = {
 	/** Well-shaped path, wrong token. Fast 404 — this is the pairing typo, see the note above. */
 	badToken: 'bad-token',
 
-	/** Valid token, path will not parse. Carries a reason, and earns a real explanation later. */
+	/**
+	 * Valid token, path will not parse. Carries a `REJECTION_REASONS` value, which `/api/display` now
+	 * turns into a board naming the wrong segment rather than a 404 — see `src/byos/screens.js`.
+	 */
 	badRequest: 'bad-request',
 
-	/** Valid token, valid path, endpoint deliberately not built yet. Today's normal outcome. */
+	/**
+	 * **Retired 2026-08-01, and kept only because it is already in the dataset.** It meant "valid
+	 * token, valid path, endpoint deliberately not built yet", which stopped being reachable when the
+	 * four device routes landed. Nothing emits it now; rows carrying it are from before that.
+	 */
 	byosUnimplemented: 'byos-unimplemented',
 
 	/** A browser asking for its icon. Answered immediately so it never drags a tarpit. */
@@ -84,6 +91,25 @@ export const OUTCOMES = {
 
 	/** Someone found `/stats` and guessed at the password. Tarpitted, and worth knowing about. */
 	statsAuthFailed: 'stats-auth-failed',
+
+	/** Enrollment. Rare by nature — more than a handful means the device keeps losing its key. */
+	byosSetup: 'byos-setup',
+
+	/** The workhorse. Roughly everything, at one row per poll. */
+	byosDisplay: 'byos-display',
+
+	/** An image fetch, which only happens when the `filename` changed since the last poll. */
+	byosImage: 'byos-image',
+
+	/** The device filed diagnostics. Worth watching for on its own — it only logs when unhappy. */
+	byosLog: 'byos-log',
+
+	/**
+	 * Right URL token, wrong `Access-Token` header. Means the device holds a key derived from a
+	 * previous `DEVICE_TOKEN` and needs a re-pair, which is otherwise invisible: the sign just does
+	 * nothing for seven minutes and then draws its own error screen.
+	 */
+	byosBadAccessToken: 'byos-bad-access-token',
 };
 
 /**

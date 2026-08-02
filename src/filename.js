@@ -74,6 +74,7 @@ export const FILENAME_TAGS = {
 	noDepartures: 'noservc',
 	upstreamFailed: 'obafail',
 	renderFailed: 'rnderrs',
+	badPath: 'badpath',
 };
 
 const TAG_PATTERN = /^[a-z0-9]{7}$/;

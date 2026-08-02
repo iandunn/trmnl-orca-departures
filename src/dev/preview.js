@@ -12,6 +12,8 @@
 import { readConfig } from '../config.js';
 import { renderBoard } from '../render/index.js';
 import { buildMockStatsData, renderStatsHtml } from '../stats/render.js';
+import { runByosChecks } from './byos-check.js';
+import { renderByosCheckHtml } from './byos-page.js';
 import { edgeCaseBoards } from './edge-case-boards.js';
 import { sampleBoards } from './sample-boards.js';
 
@@ -80,6 +82,7 @@ function contactSheet( boards, nowParam ) {
 		`</style>` +
 		`<h1>1872 &times; 1404 &middot; 4-bit greyscale &middot; shown at 50% &middot; reload to re-render</h1>` +
 		`<nav>${ nav }<a href="${ PREVIEW_PREFIX }?now=live">render at the real clock</a>` +
+		`<a href="${ PREVIEW_PREFIX }/byos">BYOS self-check</a>` +
 		`<a href="${ PREVIEW_PREFIX }/stats">stats page (mock data)</a></nav>${ cards }`
 	);
 }
@@ -102,6 +105,14 @@ export async function handlePreview( request, env ) {
 	if ( pathname === `${ PREVIEW_PREFIX }/stats` ) {
 		return new Response( renderStatsHtml( buildMockStatsData( url.searchParams.get( 'range' ) ) ), {
 			headers: { 'Content-Type': 'text/html; charset=utf-8' },
+		} );
+	}
+
+	// The BYOS self-check, which drives the real device routes and asserts the contract on each one.
+	// It runs server-side so the device token is never handed to a browser — see `byos-check.js`.
+	if ( pathname === `${ PREVIEW_PREFIX }/byos` ) {
+		return new Response( renderByosCheckHtml( await runByosChecks( env, url.origin ) ), {
+			headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
 		} );
 	}
 

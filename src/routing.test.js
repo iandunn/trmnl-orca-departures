@@ -73,6 +73,7 @@ describe( 'parsePath', () => {
 				token: TOKEN,
 				agency: '1',
 				stopIds: [ '1550' ],
+				basePath: BASE,
 				route,
 			} );
 		}
@@ -83,6 +84,7 @@ describe( 'parsePath', () => {
 			token: TOKEN,
 			agency: '1',
 			stopIds: [ '1550' ],
+			basePath: BASE,
 			route: ROUTES.image,
 			filename: 'departs-3f9x1a-1785564693',
 		} );

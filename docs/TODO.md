@@ -12,7 +12,7 @@ In `src/` and tested — **202 tests, lint clean**: `render/png.js` (quantise + 
 
 Docs are split by audience: `README.md` is the overview and links out, `docs/how-it-works.md` explains the BYOS architecture and the constraints it imposes, `docs/alternatives.md` is why it is a Worker rather than Terminus, a plugin, a Pi or Pages, `docs/deploying.md` is everything needed to stand up your own sign, `docs/development.md` is everything needed to work on the code.
 
-`/api/setup`, `/api/display` and `/api/log` all still 404, confirmed against the running server. The renderer being present does not make them safe — they go in together.
+**The four device routes are in, as of 2026-08-01** — `src/byos/`, one file per endpoint, landed together and dispatched off the gate's classification. Verified against `wrangler dev` and by looking at the PNG rather than its status code. They serve the "No departure data" notice screen until OneBusAway is wired up.
 
 **To view the design:** `npm run dev`, then `http://localhost:8788/_preview`. Requires `DEV_PREVIEW=1` in `.dev.vars`.
 
@@ -44,26 +44,28 @@ Built 2026-08-01. `src/gate.js` is the shell every request passes through; `src/
 
 ### Still to do on top of the gate
 
-- **Serve the error board for an authorized request with an unusable stop.** This is the "maximally helpful once authenticated" half, and it is classified but not yet served: `classification.reason` already carries a `REJECTION_REASONS` value, and today `src/worker.js` 404s it like any other rejection. It needs a new `FILENAME_TAGS` entry — seven lowercase alphanumeric characters, distinct from every good render so the device's cache cannot suppress it — a board that reads as broken from across the room, and `/api/display` returning it with `status: 0` and a valid `refresh_rate`. An HTTP error cannot substitute: the firmware reads `status` from the JSON body and a bare 404 is inert by design.
-- **Validate the `Access-Token` header as a second factor.** The gate authenticates on the URL token only. `/api/setup` is meant to issue an `api_key` that the device then sends back on every `/api/display` call, and nothing checks it yet — so a leaked URL is currently sufficient on its own. Needs somewhere to store the issued key, which is the same storage decision as the recovery generation below.
 - **Fill in `CLOUDFLARE_ACCOUNT_ID`** in `wrangler.toml`, and **enable Analytics Engine in the dashboard** before the first deploy or it fails with error `10089`. Both are one-time human steps; the value is in `.cloudflare.env`.
 - **Watch the tarpit's effect on concurrency once there is real traffic.** A held request occupies a Worker invocation for 25 seconds. Wall time is not billed CPU so it costs nothing against that budget, but a large enough flood could crowd out the device's own poll. If the sign ever fails during an observable scan, lower `TARPIT_MS` or drop the tarpit — nothing depends on it.
 
-### The next two pieces, in order
+### The next piece
 
-Each is self-contained enough to be one session.
-
-**1. The three BYOS endpoints, together.** Never one at a time. `/api/display` needs `refresh_rate`, `filename` and `status: 0` all correct at once, plus an `image_url` under the same token prefix so the firmware's `strncmp` auth test passes. `src/routing.js` already parses the paths and `src/filename.js` already builds the cache key — this is wiring, not new invention. Log `/api/log` from the first commit; `docs/development.md` covers why and how it is read back.
-
-The `/api/log` payload is richer than the name suggests, so log every field rather than just `message`. The body is `{"logs": [...]}` and each entry carries `message`, `level`, `source_path`, `source_line`, `firmware_version`, `wake_reason`, `retry`, `sleep_duration`, `refresh_rate`, `free_heap_size`, `max_alloc_size`, `battery_voltage`, `wifi_status`, `wifi_signal` and `created_at` — shape confirmed against `usetrmnl/terminus` `doc/api.adoc`, 2026-08-01. `source_path` plus `source_line` map a failure onto a specific line of the GPLv3 firmware instead of a guess, and `free_heap_size`/`max_alloc_size` catch the out-of-memory path, which is one of the modes that draws nothing forever. Answer `204` with no body.
-
-The other half of the same window is free and easy to miss: the request headers already on every `/api/display` poll — `Battery-Voltage`, `FW-Version`, `Wake-Time`, `Update-Source`, `Width`/`Height`, plus the X's six extra battery headers. Those arrive whether or not the device ever logs, so log them too. The headers answer "did it wake, and what did it think it was doing"; `/api/log` answers "where did it fail". One caveat: `Image-Cached` reports the **previous** wake's outcome, so it is always a cycle stale.
-
-**2. Live OneBusAway data.** One fetch per stop; `references.routes` and `references.stops` ride along so no second call is needed. Dedup by `tripId`, drop anything already past, use `predictedArrivalTime` and fall back to `scheduledArrivalTime` with `live: false`. Map `route.type` to board mode — **0 is rail, 3 is bus; never match on the route name**, since RapidRide's `H Line` is a bus and would be drawn as rail. Note the region also returns type `2` (Sounder, Amtrak) and type `4` (ferries), so the mode map needs a default rather than assuming 0 or 3.
+**Live OneBusAway data.** One fetch per stop; `references.routes` and `references.stops` ride along so no second call is needed. Dedup by `tripId`, drop anything already past, use `predictedArrivalTime` and fall back to `scheduledArrivalTime` with `live: false`. Map `route.type` to board mode — **0 is rail, 3 is bus; never match on the route name**, since RapidRide's `H Line` is a bus and would be drawn as rail. Note the region also returns type `2` (Sounder, Amtrak) and type `4` (ferries), so the mode map needs a default rather than assuming 0 or 3.
 
 Take the destination from each arrival's **`tripHeadsign`**, never from `stopGroupings[].stopGroups[].name`. The group names look like headsigns and are not: OneBusAway disambiguates same-named groups by appending a counter, so route 125's two groups both come back as `Downtown Seattle South Seattle College - 0` and `- 1`. Drawing that on the panel would put a stray `- 0` on the sign. Take the "Updated at" timestamp from OBA's `currentTime`, not our own clock.
 
+It slots into a `departuresScreen()` in `src/byos/screens.js`: return a `{ tag, notice|board }` the way the three existing screens do, and `/api/display` and `/image` both pick it up with no other change. The cache key is hashed over the rendered SVG, so nothing extra is needed to make the filename move when the departures do.
+
 Still open and genuinely undecided: where the recovery generation is stored, and how the "Updated at" stamp is sized (cannot be judged until the device arrives).
+
+### Left open by the endpoints work — 2026-08-01
+
+- **The setup logo is the full-panel board image.** `/api/setup` must return an `image_url` that downloads, or the friendly-ID screen is replaced by an error screen, so it points at the ordinary image route — meaning the "logo" on the pairing screen is a 1872x1404 notice board. It will look wrong. Rendering something small needs a second size through `rasterize()`, which is hardcoded to panel dimensions. Cosmetic, shown once, and unverifiable until the device arrives.
+- **`refresh_rate` is a single constant.** `/api/display` returns `refreshActiveSeconds` unconditionally. `activeStartMinutes`, `activeEndMinutes` and `refreshIdleSeconds` are still unconsumed, which is step 8 of the task order in `docs/plans/initial-plan.md` — the windowed rate plus the overnight "seconds until morning", computed fresh each evening rather than assumed constant.
+- **The `Access-Token` check is a second copy of the path secret, not a second factor**, and the earlier note that it needed storage was wrong. `src/byos/credentials.js` derives the key by HMAC from `DEVICE_TOKEN`, so it is reproducible on every request and needs nothing persisted. What it does *not* do is add a factor: the device obtains the key from `/api/setup`, which anyone holding the URL can reach. Rotating `DEVICE_TOKEN` invalidates both at once and forces a re-pair — correct, but a physical trip to the sign.
+- **`byos-unimplemented` is retired but undeletable.** Nothing emits it now; rows carrying it predate the endpoints. Left in `OUTCOMES` with a comment saying so, because it is already in the dataset.
+- **The zero-flicker no-op is gone, and the stamp is only half the reason.** The cache key is hashed over the rendered SVG, which carries a minute-resolution "Updated at" stamp, so at `refresh_rate: 60` the panel repaints every poll. Minute accuracy is a hard requirement — a stamp that can be hours stale on a healthy sign is indistinguishable from the failure it exists to expose — but **do not attribute the whole cost to it.** Once departures are live, any row showing a countdown changes every minute on its own, so the board's hash moves every minute regardless. The stamp costs nothing during service and everything only when the board is otherwise static: overnight, on an all-clock-times board, and on the degraded screens. Which is where freshness is hardest to judge, so it is spent where it buys the most.
+
+	**If flicker ever needs cutting, the countdown is the lever, not the stamp.** Quantising the stamp saves almost nothing during service because the countdowns dominate; dropping countdowns for clock times would cut it by an order of magnitude, since a clock-time row is static until a departure rolls off. `CLAUDE.md` already argues for that independently on honesty grounds — a frozen "**4** min" is actively false in the largest type on the sign, while "4:26 pm" stays true forever. Two arguments pointing the same way. Verified 2026-08-01 that the X gets no partial refresh either way: the partial path is commented out at `display.cpp:1836-1839`, and `REFRESH_PARTIAL` is only ever selected for a 1bpp image while ours is 4-bit greyscale.
 
 ## Quick Wins
 
@@ -81,7 +83,7 @@ Try to do as many of these as possible. Don't do one if it'd overlap code with a
 	- [ ] look for any perf optimizations to improve the flicker time or reduce worker load or things of that nature. aslso cruft removal from source code
 	- [ ] Once this is ready for initial testing, run a `/security-review`
 	- [ ] test everything
-	- [ ] audit all the docs to make sure they're accurate and up to date
+	- [ ] audit all the docs to make sure they're accurate and up to date. dev/deplyoy/alternaitves/readme should be durable rather than referenceing past changes
 
 - [ ] flush wall mount options according to claude - not reviewed
 	- French cleat, VHB'd to the back. A 3–5mm aluminum or printed cleat bonded with 3M VHB 4941, mating to a cleat screwed into the wall. Zero holes in the device, sits nearly flush, holds far more than 450g, and lifts straight up and off for charging. This is what I'd do.

@@ -81,7 +81,23 @@ The stop segment takes one or two comma-separated IDs, without the agency prefix
 
 The two need not be opposite directions of one street. Whichever two stops you actually walk to is a valid pairing — the board names each one in its own band, so a pair a few blocks apart reads correctly. That is what the sample board does, and it is often the only way to get the routes you care about onto one screen: a street's two stop zones can carry different route sets entirely.
 
-The URL is saved **only if the WiFi credentials also succeed**, so a wrong WiFi password silently discards it and looks like the sign ignoring your server. Changing this URL later wipes the device's stored credentials and forces a clean re-pair — that is the supported way to move it to a different stop or server, not a fault.
+### Typing that URL into the portal
+
+The portal field is labelled for a bare server and its placeholder reads *"Enter your custom server without a trailing / (e.g. `https://trmnl.app`)"*, which makes a URL with five path segments on the end look wrong. It is not. Checked against the firmware rather than the wording:
+
+- **A path is fine.** The field is a plain `<input type="url">` (`lib/wificaptive/portal/index.html`), and the value is stored verbatim — `WebServer.cpp` reads `data["server"]` straight out of the JSON and `WifiCaptive::saveApiServer()` writes it to NVS with no parsing, no validation and no normalisation. Nothing in the firmware ever inspects the URL beyond concatenating onto it, which is exactly why the token and stop can live in it at all.
+- **The comma needs no escaping.** It is a legal sub-delimiter in a path segment, and OneBusAway stop IDs never contain one.
+- **Heed the "no trailing slash" advice, even though we survive one.** The firmware builds requests as `baseUrl + "/api/display"` with no normalisation, so a trailing slash yields `//api/display`. This server filters empty path segments and parses it correctly, but it is one more thing to be wrong about and it lengthens the base URL that the image auth check compares against.
+- **Never a query string.** Same concatenation: anything after a `?` lands before the path and mangles both. This is why the stop is a path segment in the first place.
+- **Type it exactly, including the scheme.** `type="url"` means the browser rejects the field outright without one, which reads as the form simply refusing to submit.
+
+The URL is saved **only if the WiFi credentials also succeed**, so a wrong WiFi password silently discards it and looks like the sign ignoring your server. Changing this URL later wipes the device's stored `api_key` and `friendly_id` (`WifiCaptive.cpp:459`) and forces a clean re-pair — that is the supported way to move it to a different stop or server, not a fault.
+
+### What a successful pairing looks like
+
+`/api/setup` answers with a six-character `friendly_id`, drawn from an alphabet with no `0`/`O` or `1`/`I` so it can be read off the glass, and the device shows it on its setup screen. Seeing it is the confirmation that the token, the path and the WiFi are all right.
+
+**A missing logo on that screen is expected and harmless.** The setup response also carries an image, and the two radio paths disagree about what they will accept: on 2.4 GHz the firmware sniffs PNG magic bytes and takes ours, while on 5 GHz it accepts only a BMP of exactly 48062 bytes — an 800x480 1bpp bitmap, the older device's panel size, which is a format that is broken elsewhere on the X. The `api_key` is persisted *before* that download either way, so pairing succeeds regardless; on 5 GHz the log records a download failure and the screen draws without the logo.
 
 Everything the device fetches lives under that prefix, images included: the firmware's auth check is a raw string compare against the stored base URL, so an image URL that diverges from it silently loses its token header.
 
