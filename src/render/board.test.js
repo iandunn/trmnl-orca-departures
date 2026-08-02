@@ -5,6 +5,7 @@ import {
 	PANEL_WIDTH,
 	buildBoardSvg,
 	directionLabel,
+	maxRowsPerGroup,
 	rowMetrics,
 } from './board.js';
 import { BUS_BOARD, RAIL_BOARD } from '../dev/sample-boards.js';
@@ -70,6 +71,39 @@ describe( 'rowMetrics', () => {
 
 	it( 'does not divide by a row count of zero', () => {
 		expect( rowMetrics( [] ).height ).toBe( 158 );
+	} );
+
+	// A group that drew nothing would otherwise let the surviving group's rows grow to fill the panel,
+	// so a half-failed board would be a different design rather than a missing half.
+	it( 'counts a reserved empty group as though it had drawn its rows', () => {
+		const halfFailed = [ BUS_BOARD.groups[ 0 ], { ...BUS_BOARD.groups[ 1 ], rows: [], reserved: 4 } ];
+
+		expect( rowMetrics( halfFailed ).height ).toBe( rowMetrics( BUS_BOARD.groups ).height );
+	} );
+} );
+
+describe( 'maxRowsPerGroup', () => {
+	// Row count is not configuration — it follows from the space the layout has — so the number the
+	// design was accepted at has to fall out of the geometry rather than be asserted into it.
+	it( 'gives a two-stop board the four rows per direction the design was judged at', () => {
+		expect( maxRowsPerGroup( 2 ) ).toBe( 4 );
+	} );
+
+	it( 'gives a single-direction sign more, since it pays for one band instead of two and a gap', () => {
+		expect( maxRowsPerGroup( 1 ) ).toBeGreaterThan( maxRowsPerGroup( 2 ) );
+	} );
+
+	it( 'never asks for fewer than one row', () => {
+		expect( maxRowsPerGroup( 0 ) ).toBeGreaterThanOrEqual( 1 );
+	} );
+
+	// The bound is only honest if a board built to it actually fits, which is the same silent failure
+	// `rowMetrics` guards: nothing clips, the rows just draw over the footer rule.
+	it.each( [ 1, 2 ] )( 'produces a board that clears the footer rule with %i group(s)', ( count ) => {
+		const rows = Array.from( { length: maxRowsPerGroup( count ) }, () => BUS_BOARD.groups[ 0 ].rows[ 0 ] );
+		const groups = Array.from( { length: count }, () => ( { ...BUS_BOARD.groups[ 0 ], rows } ) );
+
+		expect( rowMetrics( groups ).bottom ).toBeLessThan( FOOTER_RULE_Y );
 	} );
 } );
 

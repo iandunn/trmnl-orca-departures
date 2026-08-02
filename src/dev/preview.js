@@ -9,8 +9,9 @@
  * would expose the preview publicly along with the render cost of anyone hitting it.
  */
 
+import { currentScreen } from '../byos/display.js';
 import { readConfig } from '../config.js';
-import { renderBoard } from '../render/index.js';
+import { rasterize, renderBoard } from '../render/index.js';
 import { buildMockStatsData, renderStatsHtml } from '../stats/render.js';
 import { runByosChecks } from './byos-check.js';
 import { renderByosCheckHtml } from './byos-page.js';
@@ -18,6 +19,31 @@ import { edgeCaseBoards } from './edge-case-boards.js';
 import { sampleBoards } from './sample-boards.js';
 
 const PREVIEW_PREFIX = '/_preview';
+
+/**
+ * Boards built from a real OneBusAway call, through the exact path `/api/display` uses.
+ *
+ * The fixtures above are frozen so the design can be judged without the data moving underneath it;
+ * these are the opposite, and they are the only way to see what live predictions actually look like —
+ * a stop with one departure left, a headsign nobody thought to invent, an upstream that 429s. They go
+ * through `currentScreen()` rather than the renderer directly, so a failure draws the same degraded
+ * screen the device would get instead of an error in the browser.
+ *
+ * **The public sample stops, never the sign's own.** A preview is local, but a screenshot of one is
+ * not, and the stop this sign points at must not appear in an image anybody can share.
+ */
+const LIVE_SAMPLES = [
+	{
+		slug: 'live-bus',
+		title: 'Live — 3rd Ave & Virginia St and 3rd Ave & Pine St',
+		parsed: { agency: '1', stopIds: [ '600', '430' ] },
+	},
+	{
+		slug: 'live-rail',
+		title: "Live — Int'l District/Chinatown",
+		parsed: { agency: '40', stopIds: [ '621', '623' ] },
+	},
+];
 
 /** 2001-09-09, the same floor the filename epoch uses. Anything earlier is a typo, not a moment. */
 const EARLIEST_PINNED_MS = 1000000000000;
@@ -126,7 +152,7 @@ export async function handlePreview( request, env ) {
 	const boards = [ ...sampleBoards( at ), ...edgeCaseBoards( at ) ];
 
 	if ( pathname === PREVIEW_PREFIX || pathname === `${ PREVIEW_PREFIX }/` ) {
-		return new Response( contactSheet( boards, url.searchParams.get( 'now' ) ), {
+		return new Response( contactSheet( [ ...boards, ...LIVE_SAMPLES ], url.searchParams.get( 'now' ) ), {
 			headers: { 'Content-Type': 'text/html; charset=utf-8' },
 		} );
 	}
@@ -136,17 +162,26 @@ export async function handlePreview( request, env ) {
 	}
 
 	const slug = pathname.slice( PREVIEW_PREFIX.length + 1 ).replace( /\.png$/, '' );
+
+	// A browser must never cache any of these, or a reload shows a stale design — and on the live
+	// boards, stale departures.
+	const headers = { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' };
+	const live = LIVE_SAMPLES.find( ( candidate ) => candidate.slug === slug );
+
+	if ( live ) {
+		// `?now=` is deliberately ignored here. These boards are stamped with OneBusAway's own
+		// `currentTime`, and pinning the header to some other instant would make the stamp claim a
+		// freshness the rows do not have — the one thing it exists not to do.
+		const { svg } = await currentScreen( { parsed: live.parsed }, env, Date.now() );
+
+		return new Response( await rasterize( svg ), { headers } );
+	}
+
 	const sample = boards.find( ( candidate ) => candidate.slug === slug );
 
 	if ( ! sample ) {
 		return null;
 	}
 
-	return new Response( await renderBoard( sample.board ), {
-		headers: {
-			'Content-Type': 'image/png',
-			// The device caches on `filename`; a browser must not, or reloads show a stale design.
-			'Cache-Control': 'no-store',
-		},
-	} );
+	return new Response( await renderBoard( sample.board ), { headers } );
 }

@@ -31,6 +31,34 @@ function partsOf( timestampMs, timezone, options ) {
 }
 
 /**
+ * A wall-clock time as the two pieces the board draws separately.
+ *
+ * The meridiem is set at its own size and weight beside the numerals, so it has to arrive as its own
+ * string rather than being sliced back off a formatted one — see the U+202F note above for what
+ * slicing costs.
+ *
+ * @param {number} timestampMs
+ * @param {string} timezone
+ * @returns {{ clock: string, meridiem: string }}
+ */
+export function formatClockTime( timestampMs, timezone ) {
+	if ( ! Number.isFinite( timestampMs ) ) {
+		throw new TypeError( `formatClockTime needs epoch milliseconds, got ${ JSON.stringify( timestampMs ) }` );
+	}
+
+	const time = partsOf( timestampMs, timezone, {
+		hour: 'numeric',
+		minute: '2-digit',
+		hour12: true,
+	} );
+
+	return {
+		clock: `${ time.hour }:${ time.minute }`,
+		meridiem: ( time.dayPeriod ?? '' ).toLowerCase(),
+	};
+}
+
+/**
  * The four header fields plus the "Updated at" stamp.
  *
  * The date carries **no comma** after the weekday, matching Metro's own sign, and the weekday and
@@ -53,14 +81,7 @@ export function formatBoardTime( timestampMs, timezone ) {
 		day: 'numeric',
 	} );
 
-	const time = partsOf( timestampMs, timezone, {
-		hour: 'numeric',
-		minute: '2-digit',
-		hour12: true,
-	} );
-
-	const clock = `${ time.hour }:${ time.minute }`;
-	const meridiem = ( time.dayPeriod ?? '' ).toLowerCase();
+	const { clock, meridiem } = formatClockTime( timestampMs, timezone );
 
 	return {
 		weekday: day.weekday,

@@ -1,0 +1,476 @@
+{
+  "code": 200,
+  "currentTime": 1785632415021,
+  "data": {
+    "entry": {
+      "arrivalsAndDepartures": [
+        {
+          "actualTrack": "",
+          "arrivalEnabled": true,
+          "blockTripSequence": 9,
+          "departureEnabled": true,
+          "distanceFromStop": -844.0745263707358,
+          "frequency": null,
+          "historicalOccupancy": "",
+          "lastUpdateTime": 1785632393000,
+          "numberOfStopsAway": -2,
+          "occupancyStatus": "",
+          "predicted": true,
+          "predictedArrivalInterval": null,
+          "predictedArrivalTime": 1785632162000,
+          "predictedDepartureInterval": null,
+          "predictedDepartureTime": 1785632260000,
+          "predictedOccupancy": "",
+          "routeId": "40_2LINE",
+          "routeLongName": "Lynnwood - Downtown Redmond",
+          "routeShortName": "2 Line",
+          "scheduledArrivalInterval": null,
+          "scheduledArrivalTime": 1785632190000,
+          "scheduledDepartureInterval": null,
+          "scheduledDepartureTime": 1785632220000,
+          "scheduledTrack": "",
+          "serviceDate": 1785567600000,
+          "situationIds": [
+            "40_19331"
+          ],
+          "status": "default",
+          "stopId": "40_621",
+          "stopSequence": 12,
+          "totalStopsInTrip": 25,
+          "tripHeadsign": "Lynnwood City Center",
+          "tripId": "40_LLR_2026-03-29_Jan29_Spring26_CLCrev_Saturday_2LINE_3080",
+          "vehicleId": "40_587.261249"
+        },
+        {
+          "actualTrack": "",
+          "arrivalEnabled": true,
+          "blockTripSequence": 8,
+          "departureEnabled": true,
+          "distanceFromStop": 695.8203790998086,
+          "frequency": null,
+          "historicalOccupancy": "",
+          "lastUpdateTime": 1785632392000,
+          "numberOfStopsAway": 1,
+          "occupancyStatus": "",
+          "predicted": true,
+          "predictedArrivalInterval": null,
+          "predictedArrivalTime": 1785632488000,
+          "predictedDepartureInterval": null,
+          "predictedDepartureTime": 1785632518000,
+          "predictedOccupancy": "",
+          "routeId": "40_100479",
+          "routeLongName": "Lynnwood - Federal Way",
+          "routeShortName": "1 Line",
+          "scheduledArrivalInterval": null,
+          "scheduledArrivalTime": 1785632490000,
+          "scheduledDepartureInterval": null,
+          "scheduledDepartureTime": 1785632520000,
+          "scheduledTrack": "",
+          "serviceDate": 1785567600000,
+          "situationIds": [
+            "40_19331"
+          ],
+          "status": "default",
+          "stopId": "40_621",
+          "stopSequence": 13,
+          "totalStopsInTrip": 26,
+          "tripHeadsign": "Lynnwood City Center",
+          "tripId": "40_LLR_2026-03-29_Jan29_Spring26_CLCrev_Saturday_100479_1081",
+          "vehicleId": "40_578.433022"
+        },
+        {
+          "actualTrack": "",
+          "arrivalEnabled": true,
+          "blockTripSequence": 9,
+          "departureEnabled": true,
+          "distanceFromStop": 6355.275716686621,
+          "frequency": null,
+          "historicalOccupancy": "",
+          "lastUpdateTime": 1785632402000,
+          "numberOfStopsAway": 1,
+          "occupancyStatus": "",
+          "predicted": true,
+          "predictedArrivalInterval": null,
+          "predictedArrivalTime": 1785632925000,
+          "predictedDepartureInterval": null,
+          "predictedDepartureTime": 1785632955000,
+          "predictedOccupancy": "",
+          "routeId": "40_2LINE",
+          "routeLongName": "Lynnwood - Downtown Redmond",
+          "routeShortName": "2 Line",
+          "scheduledArrivalInterval": null,
+          "scheduledArrivalTime": 1785632790000,
+          "scheduledDepartureInterval": null,
+          "scheduledDepartureTime": 1785632820000,
+          "scheduledTrack": "",
+          "serviceDate": 1785567600000,
+          "situationIds": [
+            "40_19331"
+          ],
+          "status": "default",
+          "stopId": "40_621",
+          "stopSequence": 12,
+          "totalStopsInTrip": 25,
+          "tripHeadsign": "Lynnwood City Center",
+          "tripId": "40_LLR_2026-03-29_Jan29_Spring26_CLCrev_Saturday_2LINE_3081",
+          "vehicleId": "40_587.395464"
+        },
+        {
+          "actualTrack": "",
+          "arrivalEnabled": true,
+          "blockTripSequence": 8,
+          "departureEnabled": true,
+          "distanceFromStop": 4249.673764503677,
+          "frequency": null,
+          "historicalOccupancy": "",
+          "lastUpdateTime": 1785632382000,
+          "numberOfStopsAway": 3,
+          "occupancyStatus": "",
+          "predicted": true,
+          "predictedArrivalInterval": null,
+          "predictedArrivalTime": 1785633015000,
+          "predictedDepartureInterval": null,
+          "predictedDepartureTime": 1785633045000,
+          "predictedOccupancy": "",
+          "routeId": "40_100479",
+          "routeLongName": "Lynnwood - Federal Way",
+          "routeShortName": "1 Line",
+          "scheduledArrivalInterval": null,
+          "scheduledArrivalTime": 1785633090000,
+          "scheduledDepartureInterval": null,
+          "scheduledDepartureTime": 1785633120000,
+          "scheduledTrack": "",
+          "serviceDate": 1785567600000,
+          "situationIds": [
+            "40_19331"
+          ],
+          "status": "default",
+          "stopId": "40_621",
+          "stopSequence": 13,
+          "totalStopsInTrip": 26,
+          "tripHeadsign": "Lynnwood City Center",
+          "tripId": "40_LLR_2026-03-29_Jan29_Spring26_CLCrev_Saturday_100479_1082",
+          "vehicleId": "40_578.471312"
+        },
+        {
+          "actualTrack": "",
+          "arrivalEnabled": true,
+          "blockTripSequence": 9,
+          "departureEnabled": true,
+          "distanceFromStop": 14768.187828372465,
+          "frequency": null,
+          "historicalOccupancy": "",
+          "lastUpdateTime": 1785632401000,
+          "numberOfStopsAway": 3,
+          "occupancyStatus": "",
+          "predicted": true,
+          "predictedArrivalInterval": null,
+          "predictedArrivalTime": 1785633481000,
+          "predictedDepartureInterval": null,
+          "predictedDepartureTime": 1785633511000,
+          "predictedOccupancy": "",
+          "routeId": "40_2LINE",
+          "routeLongName": "Lynnwood - Downtown Redmond",
+          "routeShortName": "2 Line",
+          "scheduledArrivalInterval": null,
+          "scheduledArrivalTime": 1785633390000,
+          "scheduledDepartureInterval": null,
+          "scheduledDepartureTime": 1785633420000,
+          "scheduledTrack": "",
+          "serviceDate": 1785567600000,
+          "situationIds": [
+            "40_19331"
+          ],
+          "status": "default",
+          "stopId": "40_621",
+          "stopSequence": 12,
+          "totalStopsInTrip": 25,
+          "tripHeadsign": "Lynnwood City Center",
+          "tripId": "40_LLR_2026-03-29_Jan29_Spring26_CLCrev_Saturday_2LINE_3082",
+          "vehicleId": "40_588.413326"
+        },
+        {
+          "actualTrack": "",
+          "arrivalEnabled": true,
+          "blockTripSequence": 8,
+          "departureEnabled": true,
+          "distanceFromStop": 11730.922504436458,
+          "frequency": null,
+          "historicalOccupancy": "",
+          "lastUpdateTime": 1785632385000,
+          "numberOfStopsAway": 7,
+          "occupancyStatus": "",
+          "predicted": true,
+          "predictedArrivalInterval": null,
+          "predictedArrivalTime": 1785633750000,
+          "predictedDepartureInterval": null,
+          "predictedDepartureTime": 1785633780000,
+          "predictedOccupancy": "",
+          "routeId": "40_100479",
+          "routeLongName": "Lynnwood - Federal Way",
+          "routeShortName": "1 Line",
+          "scheduledArrivalInterval": null,
+          "scheduledArrivalTime": 1785633690000,
+          "scheduledDepartureInterval": null,
+          "scheduledDepartureTime": 1785633720000,
+          "scheduledTrack": "",
+          "serviceDate": 1785567600000,
+          "situationIds": [
+            "40_19331"
+          ],
+          "status": "default",
+          "stopId": "40_621",
+          "stopSequence": 13,
+          "totalStopsInTrip": 26,
+          "tripHeadsign": "Lynnwood City Center",
+          "tripId": "40_LLR_2026-03-29_Jan29_Spring26_CLCrev_Saturday_100479_1083",
+          "vehicleId": "40_590.724021"
+        },
+        {
+          "actualTrack": "",
+          "arrivalEnabled": true,
+          "blockTripSequence": 9,
+          "departureEnabled": true,
+          "distanceFromStop": 18864.08303533349,
+          "frequency": null,
+          "historicalOccupancy": "",
+          "lastUpdateTime": 1785632385000,
+          "numberOfStopsAway": 7,
+          "occupancyStatus": "",
+          "predicted": true,
+          "predictedArrivalInterval": null,
+          "predictedArrivalTime": 1785634030000,
+          "predictedDepartureInterval": null,
+          "predictedDepartureTime": 1785634060000,
+          "predictedOccupancy": "",
+          "routeId": "40_2LINE",
+          "routeLongName": "Lynnwood - Downtown Redmond",
+          "routeShortName": "2 Line",
+          "scheduledArrivalInterval": null,
+          "scheduledArrivalTime": 1785633990000,
+          "scheduledDepartureInterval": null,
+          "scheduledDepartureTime": 1785634020000,
+          "scheduledTrack": "",
+          "serviceDate": 1785567600000,
+          "situationIds": [
+            "40_19331"
+          ],
+          "status": "default",
+          "stopId": "40_621",
+          "stopSequence": 12,
+          "totalStopsInTrip": 25,
+          "tripHeadsign": "Lynnwood City Center",
+          "tripId": "40_LLR_2026-03-29_Jan29_Spring26_CLCrev_Saturday_2LINE_3083",
+          "vehicleId": "40_588.592155"
+        },
+        {
+          "actualTrack": "",
+          "arrivalEnabled": true,
+          "blockTripSequence": 8,
+          "departureEnabled": true,
+          "distanceFromStop": 20587.017552665435,
+          "frequency": null,
+          "historicalOccupancy": "",
+          "lastUpdateTime": 1785632405000,
+          "numberOfStopsAway": 8,
+          "occupancyStatus": "",
+          "predicted": true,
+          "predictedArrivalInterval": null,
+          "predictedArrivalTime": 1785634298000,
+          "predictedDepartureInterval": null,
+          "predictedDepartureTime": 1785634328000,
+          "predictedOccupancy": "",
+          "routeId": "40_100479",
+          "routeLongName": "Lynnwood - Federal Way",
+          "routeShortName": "1 Line",
+          "scheduledArrivalInterval": null,
+          "scheduledArrivalTime": 1785634290000,
+          "scheduledDepartureInterval": null,
+          "scheduledDepartureTime": 1785634320000,
+          "scheduledTrack": "",
+          "serviceDate": 1785567600000,
+          "situationIds": [
+            "40_19331"
+          ],
+          "status": "default",
+          "stopId": "40_621",
+          "stopSequence": 13,
+          "totalStopsInTrip": 26,
+          "tripHeadsign": "Lynnwood City Center",
+          "tripId": "40_LLR_2026-03-29_Jan29_Spring26_CLCrev_Saturday_100479_1084",
+          "vehicleId": "40_590.815560"
+        }
+      ],
+      "nearbyStopIds": [
+        "40_623",
+        "1_844",
+        "40_LS844",
+        "40_C09-E-00003",
+        "40_C09-E-00004",
+        "40_C09",
+        "29_5jack",
+        "29_2706",
+        "1_620",
+        "40_C09-E-00002",
+        "40_C09-E-00001",
+        "1_1471",
+        "1_1652",
+        "1_1530",
+        "1_1651"
+      ],
+      "situationIds": [
+        "40_19331"
+      ],
+      "stopId": "40_621"
+    },
+    "references": {
+      "agencies": [
+        {
+          "disclaimer": "",
+          "email": "main@soundtransit.org",
+          "fareUrl": "https://www.soundtransit.org/ride-with-us/how-to-pay/fares",
+          "id": "40",
+          "lang": "en",
+          "name": "Sound Transit",
+          "phone": "1-888-889-6368",
+          "privateService": false,
+          "timezone": "America/Los_Angeles",
+          "url": "https://www.soundtransit.org"
+        },
+        {
+          "disclaimer": "",
+          "email": "",
+          "fareUrl": "https://kingcounty.gov/en/dept/metro/fares-and-payment/prices",
+          "id": "1",
+          "lang": "EN",
+          "name": "Metro Transit",
+          "phone": "206-553-3000",
+          "privateService": false,
+          "timezone": "America/Los_Angeles",
+          "url": "https://kingcounty.gov/en/dept/metro"
+        },
+        {
+          "disclaimer": "",
+          "email": "",
+          "fareUrl": "https://www.seattle.gov/transportation/getting-around/transit/streetcar/fares-and-orca-card",
+          "id": "23",
+          "lang": "EN",
+          "name": "City of Seattle",
+          "phone": "206-684-7623",
+          "privateService": false,
+          "timezone": "America/Los_Angeles",
+          "url": "https://www.seattle.gov/transportation/getting-around/transit/streetcar"
+        }
+      ],
+      "routes": [
+        {
+          "agencyId": "40",
+          "color": "28813F",
+          "description": "1 Line runs between Lynnwood City Center Station and Federal Way Downtown Station seven days a week",
+          "id": "40_100479",
+          "longName": "Lynnwood - Federal Way",
+          "nullSafeShortName": "1 Line",
+          "shortName": "1 Line",
+          "textColor": "FFFFFF",
+          "type": 0,
+          "url": "https://www.soundtransit.org/1"
+        },
+        {
+          "agencyId": "40",
+          "color": "007CAD",
+          "description": "2 Line runs between Lynnwood City Center Station and Downtown Redmond Station seven days a week",
+          "id": "40_2LINE",
+          "longName": "Lynnwood - Downtown Redmond",
+          "nullSafeShortName": "2 Line",
+          "shortName": "2 Line",
+          "textColor": "FFFFFF",
+          "type": 0,
+          "url": "https://www.soundtransit.org/2"
+        }
+      ],
+      "situations": [
+        {
+          "activeWindows": [
+            {
+              "from": 1785596400000,
+              "to": 1785663000000
+            }
+          ],
+          "allAffects": [
+            {
+              "agencyId": "40",
+              "applicationId": "",
+              "directionId": "",
+              "routeId": "40_100479",
+              "stopId": "",
+              "tripId": ""
+            },
+            {
+              "agencyId": "40",
+              "applicationId": "",
+              "directionId": "",
+              "routeId": "40_2LINE",
+              "stopId": "",
+              "tripId": ""
+            }
+          ],
+          "consequenceMessage": "",
+          "consequences": [
+            {
+              "condition": "",
+              "conditionDetails": {
+                "diversionPath": {
+                  "length": 0,
+                  "levels": "",
+                  "points": ""
+                },
+                "diversionStopIds": []
+              }
+            }
+          ],
+          "creationTime": 1785632350860,
+          "description": {
+            "lang": "en",
+            "value": "Seafair Weekend Festival \r\nMariners vs Minnesota Twins  - 1:10 p.m.\r\nEd Sheeran Loop Tour - 5:30 p.m.\r\n\nPlease plan ahead for additional travel time and anticipate crowds in stations, on platforms, in trains, and in parking facilities. On game days, parking facilities fill up quickly and earlier in the day. Plan accordingly to ensure you can secure parking."
+          },
+          "id": "40_19331",
+          "publicationWindows": [],
+          "reason": "OTHER_CAUSE",
+          "severity": "noImpact",
+          "summary": {
+            "lang": "en",
+            "value": "What’s happening in Seattle today could affect your travel. Plan ahead for additional travel time."
+          },
+          "url": {
+            "lang": "en",
+            "value": "https://www.soundtransit.org/ride-with-us/service-alerts"
+          }
+        }
+      ],
+      "stopTimes": [],
+      "stops": [
+        {
+          "code": "621",
+          "direction": "N",
+          "id": "40_621",
+          "lat": 47.598438,
+          "locationType": 0,
+          "lon": -122.32782,
+          "name": "Int'l Dist/Chinatown",
+          "parent": "40_C09",
+          "routeIds": [
+            "40_100479",
+            "40_2LINE"
+          ],
+          "staticRouteIds": [
+            "40_100479",
+            "40_2LINE"
+          ],
+          "wheelchairBoarding": "ACCESSIBLE"
+        }
+      ]
+    }
+  },
+  "text": "OK",
+  "version": 2
+}

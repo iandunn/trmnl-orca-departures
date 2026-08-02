@@ -1,9 +1,14 @@
 /**
  * The screens `/api/display` can serve.
  *
- * Live departures are not among them yet — OneBusAway is the next piece of work. Until then a valid
- * request gets the "waiting for data" notice, which is the honest thing to put on the glass and also
- * exercises the degraded path before it is needed in anger.
+ * A working sign draws a departures board, built in `src/oba/`. The screens here are what it draws
+ * instead when it cannot: a bad URL, an upstream that would not answer, or a throw on the way to the
+ * board. Each is a full-panel notice rather than a board with small print, because a degraded state
+ * has to be obvious from the doorway — someone glancing at the sign must see immediately that it is
+ * not currently telling them when the bus comes.
+ *
+ * A stop that simply has no more service today is **not** one of these. That is a real answer, so it
+ * stays on the board and is said in the direction band it belongs to.
  *
  * ## Every screen carries the clock, and that is a deliberate trade
  *
@@ -48,21 +53,27 @@ function clockFields( timestampMs, timezone ) {
  */
 
 /**
- * The sign is reachable, configured and authenticated — there is simply no departure data wired up
- * yet. Distinct from "OneBusAway failed", which is a different tag and a different sentence.
+ * OneBusAway could not be reached, or answered with nothing usable, for every stop on the board.
+ *
+ * Distinct from a board whose groups are all empty, which uses `FILENAME_TAGS.noDepartures` and stays
+ * a board: "no more buses today" is an answer and "we could not ask" is a fault, and a reader has to
+ * be able to tell them apart from across the room.
+ *
+ * A *partial* failure never reaches here: one stop answering is enough for a board, and the stop that
+ * did not gets its own line in its own band.
  *
  * @param {object} options
  * @param {number} options.nowMs
  * @param {string} options.timezone
- * @param {string} options.stopLabel A description of the stop, for the footer.
+ * @param {string} options.stopLabel
  * @returns {Screen}
  */
-export function awaitingDataScreen( { nowMs, timezone, stopLabel } ) {
+export function upstreamFailedScreen( { nowMs, timezone, stopLabel } ) {
 	return {
-		tag: FILENAME_TAGS.noDepartures,
+		tag: FILENAME_TAGS.upstreamFailed,
 		notice: {
-			headline: 'No departure data',
-			detail: 'The sign is connected. Live arrivals are not switched on yet.',
+			headline: 'No live arrivals',
+			detail: 'OneBusAway is not answering. Departure times are unavailable.',
 			stopName: stopLabel,
 			...clockFields( nowMs, timezone ),
 		},

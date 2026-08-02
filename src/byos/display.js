@@ -26,10 +26,12 @@
  */
 
 import { readConfig } from '../config.js';
-import { buildFilename, stableEpoch } from '../filename.js';
+import { buildFilename, FILENAME_TAGS, stableEpoch } from '../filename.js';
+import { loadBoard } from '../oba/index.js';
+import { buildBoardSvg } from '../render/board.js';
 import { buildNoticeSvg } from '../render/notice.js';
 import { toOneBusAwayId } from '../routing.js';
-import { awaitingDataScreen, badRequestScreen, renderFailedScreen } from './screens.js';
+import { badRequestScreen, renderFailedScreen, upstreamFailedScreen } from './screens.js';
 
 /** JSON, and never a bare object — `status` has to be in the body of every single response. */
 function displayResponse( body ) {
@@ -64,6 +66,36 @@ export function imageUrl( request, basePath, filename ) {
 }
 
 /**
+ * A departures board, or the notice that stands in for one.
+ *
+ * The empty board is deliberately still a board: "no more departures today" is a real answer, said in
+ * the band of the direction it applies to, and a full-panel notice would throw away the other
+ * direction's rows to say it. Only the tag changes, which is what keeps its filename distinct from a
+ * board with departures on it.
+ */
+async function departuresScreen( parsed, env, config, nowMs, allowStale ) {
+	const result = await loadBoard( { env, config, parsed, nowMs, allowStale } );
+
+	if ( ! result.ok ) {
+		return upstreamFailedScreen( {
+			nowMs,
+			timezone: config.timezone,
+			stopLabel: stopLabel( parsed ),
+		} );
+	}
+
+	return {
+		tag: result.empty ? FILENAME_TAGS.noDepartures : FILENAME_TAGS.departures,
+		board: result.board,
+	};
+}
+
+/** A screen is either a board or a notice, and only one builder handles each. */
+function screenSvg( screen ) {
+	return screen.board ? buildBoardSvg( screen.board ) : buildNoticeSvg( screen.notice );
+}
+
+/**
  * Chooses the screen, renders its SVG, and derives the cache key from it.
  *
  * Exported so `/image` can rebuild the identical screen without a second copy of this logic — the
@@ -77,29 +109,34 @@ export function imageUrl( request, basePath, filename ) {
  * precisely the appearance the stamp exists to rule out. Building the SVG costs ~0 ms — rasterising
  * is the expensive step and does not happen here — so this is cheap as well as correct.
  *
- * @param {object} target        `{ parsed }` for a good request, `{ reason }` for a malformed one.
- * @param {object} env
- * @param {number} nowMs
- * @returns {{ screen: import('./screens.js').Screen, svg: string, filename: string }}
+ * @param {object}  target             `{ parsed }` for a good request, `{ reason }` for a malformed one.
+ * @param {object}  env
+ * @param {number}  nowMs
+ * @param {object}  [options]
+ * @param {boolean} [options.allowStale] Fall back to the last good upstream response when a fresh
+ *                                       fetch fails. `/image` sets it; see `src/oba/memo.js`.
+ * @returns {Promise<{ screen: import('./screens.js').Screen, svg: string, filename: string }>}
  */
-export function currentScreen( target, env, nowMs ) {
-	const { timezone } = readConfig( env );
+export async function currentScreen( target, env, nowMs, { allowStale = false } = {} ) {
+	const config = readConfig( env );
+	const { timezone } = config;
 
 	let screen;
+	let svg;
 
+	// Building the SVG is inside the same guard as choosing the screen, because a board assembled from
+	// upstream data can throw on the way to markup just as readily as fetching it can.
 	try {
-		if ( target.parsed ) {
-			// Live OneBusAway data is the next piece of work; until it exists this is the honest
-			// screen, and it is a real degraded state rather than a placeholder.
-			screen = awaitingDataScreen( { nowMs, timezone, stopLabel: stopLabel( target.parsed ) } );
-		} else {
-			screen = badRequestScreen( { nowMs, timezone, reason: target.reason } );
-		}
-	} catch {
-		screen = renderFailedScreen( { nowMs, timezone, stopLabel: '' } );
-	}
+		screen = target.parsed
+			? await departuresScreen( target.parsed, env, config, nowMs, allowStale )
+			: badRequestScreen( { nowMs, timezone, reason: target.reason } );
+		svg = screenSvg( screen );
+	} catch ( error ) {
+		console.log( JSON.stringify( { event: 'byos-screen-failed', message: String( error ) } ) );
 
-	const svg = buildNoticeSvg( screen.notice );
+		screen = renderFailedScreen( { nowMs, timezone, stopLabel: '' } );
+		svg = buildNoticeSvg( screen.notice );
+	}
 
 	return {
 		screen,
@@ -126,7 +163,7 @@ export async function handleDisplay( request, target, env ) {
 	let tag = '';
 
 	try {
-		( { filename, screen: { tag } = {} } = currentScreen( target, env, nowMs ) );
+		( { filename, screen: { tag } = {} } = await currentScreen( target, env, nowMs ) );
 	} catch ( error ) {
 		// The last resort. `buildFilename` throws on a bad tag or a bad epoch, and even that must not
 		// reach the device as a 500 — a fixed name is a frozen panel, which is survivable; a missing

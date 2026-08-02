@@ -9,15 +9,18 @@ describe( 'edge case boards', () => {
 			'edge-headsigns',
 			'edge-band',
 			'edge-sparse',
+			'edge-half-failed',
+			'edge-no-service',
 		] );
 	} );
 
 	// A render lifted out of the preview must not be mistakable for a departures board. The boards
 	// that compose routes across stops say so in the slot a real board uses for the stop name.
-	// `edge-band` is exempt on purpose: its stop names and numbers are genuinely real, which is the
-	// whole point of it.
+	// Two are exempt on purpose, for the same reason: their stop names and numbers are genuinely the
+	// public sample stops, which is the whole point of them.
 	it( 'marks every composed board as not a real stop', () => {
-		const composed = edgeCaseBoards().filter( ( sample ) => sample.slug !== 'edge-band' );
+		const realStops = [ 'edge-band', 'edge-half-failed', 'edge-no-service' ];
+		const composed = edgeCaseBoards().filter( ( sample ) => ! realStops.includes( sample.slug ) );
 
 		expect( composed ).toHaveLength( 4 );
 

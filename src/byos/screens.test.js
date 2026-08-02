@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { awaitingDataScreen, badRequestScreen, renderFailedScreen } from './screens.js';
+import { badRequestScreen, renderFailedScreen, upstreamFailedScreen } from './screens.js';
 import { REJECTION_REASONS } from '../abuse.js';
 import { FILENAME_TAGS } from '../filename.js';
 
@@ -11,21 +11,24 @@ const TZ = 'America/Los_Angeles';
 describe( 'the tags are all distinct', () => {
 	it( 'gives each screen its own', () => {
 		const tags = [
-			awaitingDataScreen( { nowMs: NOW, timezone: TZ, stopLabel: '1_590' } ).tag,
+			upstreamFailedScreen( { nowMs: NOW, timezone: TZ, stopLabel: '1_600' } ).tag,
 			badRequestScreen( { nowMs: NOW, timezone: TZ, reason: REJECTION_REASONS.invalidAgency } ).tag,
-			renderFailedScreen( { nowMs: NOW, timezone: TZ, stopLabel: '1_590' } ).tag,
+			renderFailedScreen( { nowMs: NOW, timezone: TZ, stopLabel: '1_600' } ).tag,
 		];
 
 		expect( new Set( tags ).size ).toBe( tags.length );
-		expect( tags ).toEqual( [ FILENAME_TAGS.noDepartures, FILENAME_TAGS.badPath, FILENAME_TAGS.renderFailed ] );
+		expect( tags ).toEqual( [ FILENAME_TAGS.upstreamFailed, FILENAME_TAGS.badPath, FILENAME_TAGS.renderFailed ] );
 	} );
 } );
 
-describe( 'awaitingDataScreen', () => {
-	it( 'says plainly that there are no departures rather than showing an empty board', () => {
-		const { notice } = awaitingDataScreen( { nowMs: NOW, timezone: TZ, stopLabel: '1_590' } );
+describe( 'upstreamFailedScreen', () => {
+	// A board full of blanks would read as a design, not a fault. The whole point of dropping to a
+	// notice is that it cannot be mistaken for departures at a glance.
+	it( 'says the data source failed rather than drawing an empty board', () => {
+		const { notice } = upstreamFailedScreen( { nowMs: NOW, timezone: TZ, stopLabel: '1_600' } );
 
-		expect( notice.headline ).toBe( 'No departure data' );
+		expect( notice.headline ).toBe( 'No live arrivals' );
+		expect( notice.detail ).toContain( 'OneBusAway' );
 		expect( notice.asOf ).toBe( '4:22 pm' );
 	} );
 } );

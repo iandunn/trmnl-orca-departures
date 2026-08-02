@@ -225,6 +225,81 @@ function sparseBoard( time ) {
 }
 
 /**
+ * One direction answered and the other did not.
+ *
+ * Two stops fail independently, so this is the ordinary shape of an outage rather than a rare one.
+ * The empty group keeps its band and its full share of the panel — `reserved` is what buys that — so
+ * the surviving rows are exactly the size they would be on a healthy board. Without it they would
+ * grow to fill the gap and the failure would read as a different design.
+ */
+function halfFailedBoard( time ) {
+	return {
+		mode: 'bus',
+		agency: 'KING COUNTY METRO',
+		...time,
+		groups: [
+			{
+				heading: 'Northbound',
+				name: '3rd Ave & Virginia St',
+				stop: 'Stop No. 600',
+				rows: [
+					{ badge: 'D Line', to: 'Ballard Uptown', value: 'Now', unit: '', live: true },
+					{ badge: '13', to: 'Seattle Pacific University Seattle Center W', value: '4', unit: 'min', live: true },
+					{ badge: '40', to: 'Northgate Station Fremont', value: '9', unit: 'min', live: false },
+					{ badge: '5', to: 'Shoreline Greenwood', value: '4:47', unit: 'pm', live: true },
+				],
+			},
+			{
+				// Named and pointed the same as any other band. A stop's platform and bearing are facts
+				// about the pole rather than about this fetch, so they survive it failing — and on a
+				// two-stop sign a band that lost its direction would leave the reader unable to tell
+				// which half of the board went missing.
+				heading: 'Southbound',
+				name: '3rd Ave & Pine St',
+				stop: 'Stop No. 430',
+				rows: [],
+				reserved: 4,
+				message: 'Departure data unavailable',
+			},
+		],
+	};
+}
+
+/**
+ * Both stops answered, and the answer is that nothing more is coming.
+ *
+ * The late-night board, and the one state that cannot be forced from live data at will — a stop only
+ * enters it once its last bus has gone. It stays a board rather than dropping to a notice because
+ * "no more buses today" is information: the reader learns not to wait, which a "sign broken" screen
+ * would not tell them.
+ */
+function noServiceBoard( time ) {
+	return {
+		mode: 'bus',
+		agency: 'KING COUNTY METRO',
+		...time,
+		groups: [
+			{
+				heading: 'Northbound',
+				name: '3rd Ave & Virginia St',
+				stop: 'Stop No. 600',
+				rows: [],
+				reserved: 4,
+				message: 'No more departures today',
+			},
+			{
+				heading: 'Southbound',
+				name: '3rd Ave & Pine St',
+				stop: 'Stop No. 430',
+				rows: [],
+				reserved: 4,
+				message: 'No more departures today',
+			},
+		],
+	};
+}
+
+/**
  * @param {object} [options]
  * @param {number} [options.nowMs]    Epoch milliseconds.
  * @param {string} [options.timezone] IANA zone.
@@ -241,5 +316,7 @@ export function edgeCaseBoards( {
 		{ slug: 'edge-headsigns', title: 'Edge case — repeated words, and the longest destinations', board: headsignBoard( time ) },
 		{ slug: 'edge-band', title: 'Edge case — longest stop name, and a stop with no bearing', board: bandBoard( time ) },
 		{ slug: 'edge-sparse', title: 'Edge case — the longest destinations at full row height', board: sparseBoard( time ) },
+		{ slug: 'edge-half-failed', title: 'Edge case — one direction answered, the other did not', board: halfFailedBoard( time ) },
+		{ slug: 'edge-no-service', title: 'Edge case — both stops answered, nothing more is coming', board: noServiceBoard( time ) },
 	];
 }

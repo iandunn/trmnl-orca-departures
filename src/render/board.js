@@ -63,6 +63,34 @@ const ROW_HEIGHT = 158;
 const FOOTER_CLEARANCE = 12;
 
 /**
+ * Below this a row stops being readable across a room, so it is the floor that decides how many
+ * departures a board may ask for.
+ *
+ * The accepted eight-row board lands at 128, which is the measurement this is set just under rather
+ * than a round number picked first.
+ */
+const MIN_ROW_HEIGHT = 120;
+
+/**
+ * How many departures each group may show, derived from the space the layout actually has.
+ *
+ * Row count is not configuration — `CLAUDE.md` is explicit that it follows from the data, bounded by
+ * what fits — so the bound has to come from the geometry rather than from a number someone chose. Two
+ * groups get four each, which is the density the design was accepted at; a single-direction sign gets
+ * more, because it is not paying for a second band and a gap.
+ *
+ * @param {number} groupCount
+ * @returns {number}
+ */
+export function maxRowsPerGroup( groupCount ) {
+	const count = Math.max( groupCount, 1 );
+	const bands = count * BAND_HEIGHT + ( count - 1 ) * GROUP_GAP;
+	const available = FOOTER_RULE_Y - HEADER_HEIGHT - bands - FOOTER_CLEARANCE;
+
+	return Math.max( Math.floor( available / MIN_ROW_HEIGHT / count ), 1 );
+}
+
+/**
  * Row geometry, the only thing on the board that varies with how many departures it carries.
  *
  * Rows are **clamped** to the reference height rather than stretched to fill, so a board with space
@@ -81,7 +109,9 @@ const FOOTER_CLEARANCE = 12;
  *          the last row ends, which is the number the clamp exists to keep above `FOOTER_RULE_Y`.
  */
 export function rowMetrics( groups ) {
-	const rows = groups.reduce( ( total, group ) => total + group.rows.length, 0 );
+	// A group with nothing to draw still occupies `reserved` rows' worth of panel. That is what keeps
+	// a half-failed board's surviving direction the same size it would be on a healthy one.
+	const rows = groups.reduce( ( total, group ) => total + ( group.rows.length || group.reserved || 0 ), 0 );
 	const bands = groups.length * BAND_HEIGHT + Math.max( groups.length - 1, 0 ) * GROUP_GAP;
 	const available = FOOTER_RULE_Y - HEADER_HEIGHT - bands - FOOTER_CLEARANCE;
 	const height = rows > 0 ? Math.min( ROW_HEIGHT, Math.floor( available / rows ) ) : ROW_HEIGHT;
@@ -392,6 +422,28 @@ export function buildBoardSvg( board ) {
 		body += directionBand( group, y );
 
 		y += BAND_HEIGHT;
+
+		// A direction with nothing to show says so in its own space rather than disappearing. A group
+		// that vanished would leave a reader unable to tell a direction with no service left from one
+		// the server could not ask about — and on a two-stop board, unable to tell that a direction is
+		// missing at all.
+		if ( group.rows.length === 0 ) {
+			const span = ( group.reserved || 1 ) * rowHeight;
+
+			// Centred and set large, because the alternative was tried and looked wrong: a row-sized
+			// line at the left margin reads as a caption someone forgot to finish, floating in a void
+			// the reader then has to interpret. Centred in the space it explains, it reads as the
+			// deliberate answer to "why is half this sign empty".
+			body += text( PANEL_WIDTH / 2, y + Math.round( span / 2 ) + scaled( 20 ), scaled( 64 ), group.message ?? '', {
+				weight: 400,
+				fill: GREY,
+				anchor: 'middle',
+			} );
+
+			y += span;
+
+			return;
+		}
 
 		group.rows.forEach( ( row, rowIndex ) => {
 			body +=

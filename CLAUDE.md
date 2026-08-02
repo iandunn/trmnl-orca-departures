@@ -43,6 +43,7 @@ Every 8th render additionally gets the slow deep clear rather than the fast one 
 - `src/clock.js` — `formatBoardTime( timestampMs, timezone )`, the header fields and the "Updated at" stamp. Pure, and takes the timestamp rather than reading a clock, because the stamp must come from OneBusAway's `currentTime`. Added 2026-08-01.
 - `src/headsign.js` — `collapseRepeatedPhrases()`, which drops one copy of a phrase repeated back to back. Called by the renderer rather than by a data mapper, so it applies to live predictions and fixtures alike. Added 2026-08-01.
 - `src/route-badge.js` — `routeBadge()`, which strips ` Line` from the 13 single-character lines so `D Line` badges as `D`. Same seam and same reason as the headsign collapse. Added 2026-08-01.
+- `src/oba/` — live departures, added 2026-08-01. `client.js` fetches one stop and never throws; `memo.js` is the isolate-local cache that makes `/api/display` and `/image` agree; `departures.js` maps a response to board data and is pure; `format.js` is the `Now` / `N min` / clock ladder; `index.js` is the only entry point `src/byos/` uses. `fixtures/` holds four captured live responses for the public sample stops.
 - `src/filename.js`, `src/routing.js` — the cache key and path parsing, as before.
 - `src/gate.js` — the shell every request passes through. Returns either a finished `Response` or an authorized classification for a caller to dispatch on, which is the seam the BYOS handlers hang off. Added 2026-08-01.
 - `src/abuse.js` — `classifyRequest()`, `diagnosePath()`, the tarpit, and the `OUTCOMES` / `REJECTION_REASONS` vocabularies. Added 2026-08-01.
@@ -52,12 +53,19 @@ Every 8th render additionally gets the slow deep clear rather than the fast one 
 
 **The four device routes are implemented, in `src/byos/`.** Landed together, 2026-08-01, one file per endpoint: `setup.js`, `display.js`, `log.js`, `image.js`, with `index.js` dispatching on the gate's classification, `credentials.js` deriving the `api_key`, and `screens.js` choosing what to draw. `src/worker.js` is now nothing but the seam between `gate()` and that dispatch. Verified end to end against `wrangler dev` and by looking at the rendered PNG, not just its status code: `Content-Type: image/png` exactly, 1872x1404 4-bit greyscale, and PNG magic bytes on `/image/setup`, which is the URL pairing depends on.
 
-**They do not yet show departures.** OneBusAway is the next piece, so a valid `/api/display` currently serves the "No departure data" notice screen — a real degraded state rather than a placeholder, and the thing that exercises the degraded path before it is needed in anger.
+**They show live departures, as of 2026-08-01.** Verified by fetching the rendered PNG from `wrangler dev` and looking at it — a bus board and a rail board, both from real predictions, and the rail one happened to catch a live `429` on one of its two stops, which is how the partial-failure treatment got seen rather than only tested.
+
+Three things about that wiring are worth knowing before changing it:
+
+- **`currentScreen()` is async and is the seam.** It returns either a board or a notice, and `screenSvg()` picks the builder. `/image` calls the same function with `allowStale: true`; nothing else may.
+- **`/api/display` and `/image` share one upstream response**, through `src/oba/memo.js`. Without it the device paints bytes rendered from a different fetch than the one its `filename` was hashed over, and OneBusAway gets asked twice per wake instead of once.
+- **The board is stamped with OneBusAway's `currentTime`, and with the oldest one when two stops answer.** Our own clock is used only for cache expiry. A board that cannot be honestly stamped is not drawn — `loadBoard()` returns a failure rather than falling back to `Date.now()`, because a stamp taken from our clock says nothing about how fresh the predictions are, which is the one claim it exists to make.
 
 - **Settled design decisions** are written up in the sections below: the Metro-faithful layout, the real-time vs scheduled treatment, Fira Sans, two-stop grouping, light-rail circle badges, the OneBusAway footer mark, and the sample stops.
 - **The config surface is done** (2026-08-01). `activeStartMinutes`/`activeEndMinutes` are read but have no consumer yet — the scheduler is their first one. `HEADER_TEXT` was removed rather than wired up; see the configuration section.
 - **The request gate and the stats page are done** (2026-08-01), and both things they left classified-but-unserved are now served: an authorized request with an unusable stop renders an error board naming the wrong segment, and the `Access-Token` header is validated on `/api/display` and `/api/log`.
-- **Next:** wiring live OneBusAway data into the board. See `docs/TODO.md`.
+- **Live OneBusAway data is wired in** (2026-08-01), including the format ladder, the mode split, and the per-stop failure treatment. See the two sections below.
+- **Next:** the `refresh_rate` schedule, and the failure-mode sweep. See `docs/TODO.md`.
 
 **A block comment containing a glob will silently break the build.** `**` followed by `/*` closes the comment early and the rest of the file parses as garbage. Write "a wasm glob" in prose instead.
 
@@ -450,6 +458,40 @@ The filled-vs-hollow badge is a **shape and weight** difference rather than a to
 Also rejected: labelling every row `LIVE`/`SCHED` (variant B) spends ink and horizontal space on the majority case to restate what the badge already says, and stacking a `SCHEDULED` word above the time (variant A) crowded the numerals at native resolution.
 
 **A consequence worth keeping: grey now carries no meaning in the row area at all.** It is only de-emphasis — the footer, the `min`/`pm` units. That removes the conflict the greying variants would have created, where the same tone had to mean both "unverified" and "less important". Two distinct greys are defined in the spike for this reason: a mid grey for anything meaningful, a light grey for de-emphasis. With E, only the light one is used.
+
+#### The format ladder — thresholds read off the real signs, 2026-08-01
+
+`Now` under a minute, `N min` through **10**, clock time from **11**. In `src/oba/format.js`, and nowhere else — the mapper emits a `departsAtMs` and a `live` flag, so revisiting the ladder is a change to that one file.
+
+The numbers were **measured, not chosen.** Every photograph in `.claude/tmp/cpu-spike/metro official/` carries the current time in its header, which makes every row a data point:
+
+| Photo | Header | Largest `N min` | Smallest clock time |
+| --- | --- | --- | --- |
+| `7214b1e1…` | 6:52 am | **9 min** | — |
+| `Screenshot …12.12.38 AM` | 4:11 pm | 8 min | — |
+| `0358e155…` | 6:50 am | 8 min | 7:03 am (13 min) |
+| `Screenshot …12.12.28 AM` | 3:51 pm | 7 min | 4:03 pm (12 min) |
+| `Screenshot …12.12.14 AM` | 5:03 pm | 2 min | 5:14 pm (**11 min**) |
+| `King-County-Metro-Blog` | 4:07 pm | 4 min | 4:26 pm (19 min) |
+| `RapidRide…landscape` | 2:50 pm | 5 min | 3:10 pm (20 min) |
+
+So Metro counts minutes to at least 9 and is showing clock times by 11; 10 was the owner's call on the one boundary the photos do not settle. **Do not re-derive this from an assumption** — the first guess in this project was 20, and the photos disprove it.
+
+Two more things the same photographs settle, both free:
+
+- **`Scheduled` rows use the identical ladder.** `Scheduled 2 min`, `Scheduled 4 min` and `Scheduled 8 min` all appear on real signs. Whether a prediction is live changes the label above the time and never the format of the time.
+- **A departure slightly in the past is `Now`, not gone.** `NOW_GRACE_MS` is 60 seconds. The first departure in every captured fixture is a bus already at the kerb with a prediction a minute old; dropping those would blank the most useful row on the board exactly when it matters.
+
+Minutes are **floored**, not rounded: understating the wait sends someone to the kerb early, and overstating it lets them watch the bus leave.
+
+#### A stop that answers and a stop that does not — 2026-08-01
+
+Two stops fail independently, so half a board failing is the ordinary shape of an outage rather than a rare one.
+
+- **One stop answering is enough for a board.** The failed group keeps its band and says `Departure data unavailable` where its rows would be. Only when *every* stop fails does the sign drop to the full-panel `obafail` notice.
+- **A stop with no service left is a different sentence** — `No more departures today` — and stays a board, tagged `noservc`. "We could not ask" is a fault and "nothing is coming" is an answer, and a reader has to be able to tell them apart.
+- **An empty group keeps its full share of the panel.** `reserved` on the group, honoured by `rowMetrics()`. Without it the surviving direction's rows grow to fill the gap, and a partial failure renders as a different design rather than as a missing half. The message is centred in that space, large: left-aligned at row size it was tried first and read as a caption someone forgot to finish.
+- **Row count comes from `maxRowsPerGroup()` in `render/board.js`**, which divides the panel by a legibility floor. Two stops get four each, which is the density the design was accepted at; a single-direction sign gets more, because it pays for one band instead of two and a gap. This is how row count stays derived rather than configured.
 
 #### Accepted risk, decided 2026-08-01
 

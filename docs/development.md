@@ -24,9 +24,9 @@ So the split is by whether a command reaches the account, not by tidiness. `npm 
 
 All four device routes are implemented, and they went in as one change rather than one at a time. A partial `/api/display` is worse than none: a response missing `refresh_rate` parses as `0` and hot-loops the device until the battery is flat, and a body of `{"status": 500}` factory-resets it. That rule still governs edits — the endpoint is only correct while `refresh_rate`, `filename` and `status: 0` are all right *together*, so never change one without checking the other two, and never let a code path return early without a `refresh_rate`.
 
-They do not show departures yet. OneBusAway is the next piece; until then a valid poll serves the "No departure data" notice screen.
+They show live departures, from `src/oba/`. A poll that cannot produce a board — OneBusAway unreachable for every stop, a mistyped URL, a render that threw — serves a full-panel notice instead, each with its own `FILENAME_TAGS` tag so the device's cache cannot suppress it. A stop with no service left is not one of those: that is a real answer, and it stays on the board in the direction band it belongs to.
 
-**The stop appears on the glass.** The notice screen prints the stop IDs in its footer, which is right for the owner's own sign and is why nothing renders a notice into a committed asset — the design preview builds only the sample boards, whose stops are public downtown ones chosen precisely so they can be written down. Keep it that way if you add a preview for the degraded screens.
+**The stop appears on the glass.** The notice screens print the stop IDs in their footer and a departures board prints the stop's name and number in every band, which is right for the owner's own sign and is why nothing renders either into a committed asset — the design preview builds only the sample boards, whose stops are public downtown ones chosen precisely so they can be written down. **The BYOS self-check is the exception to watch**: it drives the real routes with the real `DEV_STOP_ID`, so the board embedded in that page names the sign's actual stop. Local-only, like everything under `/_preview`, but a screenshot of it carries roughly a home address. Keep that in mind before pasting one anywhere.
 
 ## What lives where
 
@@ -43,6 +43,7 @@ They do not show departures yet. OneBusAway is the next piece; until then a vali
 | `src/byos/log.js` | `/api/log` — the device's own diagnostics. Always `204`. |
 | `src/byos/credentials.js` | Derives the `api_key` and `friendly_id` from the shared secret. No storage. |
 | `src/byos/screens.js` | Which screen to draw for each state, and its `FILENAME_TAGS` tag. |
+| `src/oba/` | Live departures: `client.js` (one fetch per stop, never throws), `memo.js` (the isolate-local cache that keeps `/api/display` and `/image` agreeing), `departures.js` (response to board data, pure), `format.js` (the `Now` / `N min` / clock ladder), `index.js` (the only entry point `src/byos/` uses), `fixtures/` (captured live responses). |
 | `src/config.js` | `readConfig()` — the only reader of `env` for a display or scheduling value. |
 | `src/clock.js` | `formatBoardTime()` — the header fields and the "Updated at" stamp, in the configured timezone. |
 | `src/routing.js` | Path parsing and the constant-time token comparison. |
@@ -56,7 +57,13 @@ They do not show departures yet. OneBusAway is the next piece; until then a vali
 
 Tests sit beside the file they cover. `vitest.config.js` aliases `.wasm` and `.ttf` to a stub, because vitest tries to parse binary modules as JavaScript; nothing that depends on those contents is asserted. That is also why anything which actually rasterises — the image route, the preview — is exercised against a running `wrangler dev` rather than in a unit test.
 
-**A worktree under `.claude/worktrees/` cannot run `wrangler dev` as-is.** `src/render/index.js` imports the wasm and the fonts by relative path into `node_modules/`, and a linked worktree has none of its own, so the build fails with `ENOENT` on the font. `npm test` and `npm run lint` are fine — npm walks up to the parent checkout's `node_modules` for both the binaries and the bare imports. To rasterise from a worktree, temporarily point those three imports at the parent checkout's absolute path and put them back afterwards.
+**A worktree under `.claude/worktrees/` needs one symlink before `wrangler dev` will build.** `src/render/index.js` imports the wasm and the fonts by relative path into `node_modules/`, and a linked worktree has none of its own, so esbuild fails to resolve them. `npm test` and `npm run lint` are fine either way — npm walks up to the parent checkout for both the binaries and the bare imports. For `wrangler dev`, link it:
+
+```sh
+ln -s ../../../node_modules node_modules
+```
+
+`node_modules` is covered by the global gitignore, so the link is never committed. Two other things a worktree needs: a copy of `.dev.vars` (also gitignored), and a free port if the parent checkout is already serving 8788.
 
 ## Design preview
 
@@ -71,6 +78,10 @@ They carry their own `SAMPLE_DIRECTION_OVERRIDES` rather than reading the deploy
 Below the two reference boards, the sheet carries a set of **edge cases** from `src/dev/edge-case-boards.js`: route names against the badge slot in both bus and rail modes, the headsigns that must collapse and the ones that must not, the longest stop name in the region, a stop that reports no compass bearing, and a sparse board rendered at the row-height ceiling. Every name on them is real OneBusAway data; what is synthetic is the co-location, since these routes do not call at one stop, and each group says so where a real board puts the stop name.
 
 They are worth looking at after any change to the row or band. One failure they show appears only at an extreme and is easy to miss: a destination collides with the time column when the board is *sparse* enough for rows to draw at full height, which is the opposite of where anyone looks for an overflow.
+
+Last on the sheet are two **live** boards, `live-bus` and `live-rail`, built from a real OneBusAway call for the same public sample stops and pushed through the exact path `/api/display` uses — so a failure draws the degraded screen the device would get rather than an error in the browser. They are the only way to see what real predictions do to the layout: a stop with one departure left, a headsign nobody would have invented, an upstream that 429s. They ignore `?now=`, because their stamp comes from OneBusAway's own `currentTime` and pinning the header elsewhere would make it claim a freshness the rows do not have.
+
+`src/oba/fixtures/` holds four captured responses for those stops, which is what the mapping tests run against — the shared `TEST` key rate-limits too hard for a suite to call the API. Recapture with `curl` against `arrivals-and-departures-for-stop` if the response shape ever changes; the committed copies have `tripStatus`, `references.trips` and other stops' references stripped, since nothing reads them and they were four fifths of the bytes.
 
 Boards render at a fixed reference instant so the departure times stay consistent with the header. Append **`?now=live`** to render at the real clock instead — that is what exercises the timezone from config, and it is where a bad `Intl` part shows up in the header block.
 

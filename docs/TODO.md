@@ -12,7 +12,9 @@ In `src/` and tested — **202 tests, lint clean**: `render/png.js` (quantise + 
 
 Docs are split by audience: `README.md` is the overview and links out, `docs/how-it-works.md` explains the BYOS architecture and the constraints it imposes, `docs/alternatives.md` is why it is a Worker rather than Terminus, a plugin, a Pi or Pages, `docs/deploying.md` is everything needed to stand up your own sign, `docs/development.md` is everything needed to work on the code.
 
-**The four device routes are in, as of 2026-08-01** — `src/byos/`, one file per endpoint, landed together and dispatched off the gate's classification. Verified against `wrangler dev` and by looking at the PNG rather than its status code. They serve the "No departure data" notice screen until OneBusAway is wired up.
+**The four device routes are in, as of 2026-08-01** — `src/byos/`, one file per endpoint, landed together and dispatched off the gate's classification. Verified against `wrangler dev` and by looking at the PNG rather than its status code.
+
+**They serve live departures, as of 2026-08-01** — `src/oba/`, fetch through mapping to the board. Verified the same way: a bus board and a rail board fetched from `wrangler dev` and looked at, both from real predictions. `/_preview` now carries `live-bus` and `live-rail` alongside the frozen fixtures, which is the only way to see what real data does to the layout.
 
 **To view the design:** `npm run dev`, then `http://localhost:8788/_preview`. Requires `DEV_PREVIEW=1` in `.dev.vars`.
 
@@ -23,10 +25,10 @@ Built 2026-08-01. `readConfig()` in `src/config.js` is the only place that reads
 - Everything coerces and falls back rather than throwing, deliberately: the same var arrives as a **number** from `[vars]` and as a **string** from `.dev.vars` or a secret, and `/api/display` must never fail over a config value. Refresh rates below 1 second are refused, since 0 hot-loops the device flat.
 - `activeStartMinutes`/`activeEndMinutes` are exposed but **unconsumed** — the scheduler is their first reader. `HEADER_TEXT` was deleted 2026-08-01 rather than wired up: both modes draw a logo rather than a word, so it was config for a case that never arises, and a different agency needs its own logo asset that no string could supply.
 - Secrets are deliberately **not** in the config object, so no future log line can serialise one. `directionOverrides` is in it and is privacy-sensitive — never log the object.
-- **`formatBoardTime()` throws on a non-finite timestamp, on purpose, and nothing catches it yet.** This is the one place the never-fail rule and a deliberate throw collide: `/api/display` must catch it and fall back to the render-failed screen rather than let a missing OneBusAway `currentTime` take down the endpoint. Silently formatting a bad timestamp would stamp the board 1969, which is worse.
+- **`formatBoardTime()` throws on a non-finite timestamp, on purpose**, and `loadBoard()` is what decides that a board with no usable `currentTime` is simply not drawn. Falling back to our own clock is the tempting fix and the wrong one — it would stamp the board with a time that says nothing about how fresh the predictions are.
 - The preview renders at a fixed reference instant by default so the header stays consistent with the fixture rows; `?now=live` renders at the real clock.
 - Verified against ICU rather than assumed: legacy zone aliases (`US/Pacific`, `PST`) resolve to the full zone and stay DST-aware, so the timezone guard only has to catch what actually throws. Separately, ICU separates the day period with U+202F, which Fira Sans need not carry — every string is assembled from `formatToParts()` with ASCII spaces for that reason.
-- **Row count is deliberately not configuration** — it follows from how many departures the data has, bounded by what fits. `rowMetrics()` in `render/board.js` derives row height from the count rather than the other way round, so no deployment sets it. Neither is the staleness threshold, which was withdrawn as a requirement when the "Updated at" stamp became the mechanism.
+- **Row count is deliberately not configuration** — it follows from how many departures the data has, bounded by what fits. `rowMetrics()` in `render/board.js` derives row height from the count, and `maxRowsPerGroup()` derives the bound from the panel and a legibility floor, so no deployment sets either. Neither is the staleness threshold, which was withdrawn as a requirement when the "Updated at" stamp became the mechanism.
 
 ### What the request gate and stats page already guarantee
 
@@ -49,13 +51,16 @@ Built 2026-08-01. `src/gate.js` is the shell every request passes through; `src/
 
 ### The next piece
 
-**Live OneBusAway data.** One fetch per stop; `references.routes` and `references.stops` ride along so no second call is needed. Dedup by `tripId`, drop anything already past, use `predictedArrivalTime` and fall back to `scheduledArrivalTime` with `live: false`. Map `route.type` to board mode — **0 is rail, 3 is bus; never match on the route name**, since RapidRide's `H Line` is a bus and would be drawn as rail. Note the region also returns type `2` (Sounder, Amtrak) and type `4` (ferries), so the mode map needs a default rather than assuming 0 or 3.
-
-Take the destination from each arrival's **`tripHeadsign`**, never from `stopGroupings[].stopGroups[].name`. The group names look like headsigns and are not: OneBusAway disambiguates same-named groups by appending a counter, so route 125's two groups both come back as `Downtown Seattle South Seattle College - 0` and `- 1`. Drawing that on the panel would put a stray `- 0` on the sign. Take the "Updated at" timestamp from OBA's `currentTime`, not our own clock.
-
-It slots into a `departuresScreen()` in `src/byos/screens.js`: return a `{ tag, notice|board }` the way the three existing screens do, and `/api/display` and `/image` both pick it up with no other change. The cache key is hashed over the rendered SVG, so nothing extra is needed to make the filename move when the departures do.
+**The `refresh_rate` schedule.** `activeStartMinutes`, `activeEndMinutes` and `refreshIdleSeconds` are still unconsumed; see the bullet below.
 
 Still open and genuinely undecided: where the recovery generation is stored, and how the "Updated at" stamp is sized (cannot be judged until the device arrives).
+
+### Left open by the live-data work — 2026-08-01
+
+- **The memo is isolate-local, so it is best-effort.** `/api/display` and `/image` land seconds apart and almost always in the same isolate, but nothing guarantees it. A miss simply refetches, which costs one extra upstream call and a render whose bytes differ slightly from the ones the filename was hashed over — survivable, and the reason the Cache API was not worth a spike. If the sign ever shows evidence of the two disagreeing, `caches.default` is the next thing to try, after checking whether it is honoured on a `workers.dev` subdomain at all.
+- **A failed stop's band is only bare on a cold isolate.** It now takes its name and bearing from the last response the isolate saw, so during an ordinary outage the band reads normally and only the rows say anything is missing. The gap left is the first poll after a deploy or an idle period coinciding with an upstream failure: nothing has been seen yet, so the band falls back to the bare stop ID. Closing that means persisting stop identity somewhere, which is the same storage decision as the recovery generation — not worth its own.
+- **Nothing has been measured against the real OneBusAway rate limit.** Every render was against the shared `TEST` key, which 429s freely — one of the verification renders caught a live 429 on one stop, which is how the partial-failure path got seen. With a real key the memo means ~1440 calls a day for a one-stop sign and ~2880 for two. That has never been checked against whatever quota Sound Transit issues.
+- **`OBA_FAILURE_REASONS` is finer than anything consumes.** Every reason collapses to the same board. The distinctions are in the log line and are there for the failure-mode sweep below, which is where they earn their keep.
 
 ### Left open by the endpoints work — 2026-08-01
 
@@ -77,6 +82,10 @@ Try to do as many of these as possible. Don't do one if it'd overlap code with a
 
 
 ## High Priority
+
+- [ ] compare preview against oba app, seen some descrepencies
+- [ ] handle when oba says things like -2min
+- [ ] handle when oba says running late / ahead of schedule
 
 - [ ] Once this is ready for initial testing (before device arrives)
 	- [ ] compare to the template repo to see if anything should be added/changed or any features would make sense to add etc

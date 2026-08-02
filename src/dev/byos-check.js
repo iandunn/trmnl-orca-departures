@@ -28,7 +28,7 @@
 
 import { stopLabel } from '../byos/display.js';
 import { dispatchByos } from '../byos/index.js';
-import { renderFailedScreen } from '../byos/screens.js';
+import { renderFailedScreen, upstreamFailedScreen } from '../byos/screens.js';
 import { readConfig } from '../config.js';
 import { FILENAME_TAGS } from '../filename.js';
 import { gate } from '../gate.js';
@@ -437,6 +437,16 @@ export async function runByosChecks( env, origin ) {
 	} );
 	const renderFailedBytes = await rasterize( buildNoticeSvg( renderFailed.notice ) );
 
+	// Same reasoning, one step less extreme: this one *can* happen to a real poll, but only while
+	// OneBusAway is actually down, so waiting to see it means seeing it for the first time during the
+	// outage it exists to explain.
+	const upstreamFailed = upstreamFailedScreen( {
+		nowMs: Date.now(),
+		timezone: readConfig( env ).timezone,
+		stopLabel: stopLabel( { agency: env.DEV_AGENCY_ID, stopIds: String( env.DEV_STOP_ID ).split( ',' ) } ),
+	} );
+	const upstreamFailedBytes = await rasterize( buildNoticeSvg( upstreamFailed.notice ) );
+
 	const groups = [
 		{ title: 'Pairing — <code>/api/setup</code>', checks: setup.checks },
 		{ title: 'The poll — <code>/api/display</code>', checks: display.checks },
@@ -449,38 +459,73 @@ export async function runByosChecks( env, origin ) {
 
 	const all = groups.flatMap( ( group ) => group.checks );
 
+	// The served screen is whatever a real poll just produced, so its tag is read back off the
+	// filename rather than assumed. Naming it wrong would be the worst kind of wrong on this page:
+	// every check here exists because the failures are silent, and a caption asserting a state the
+	// bytes do not show is exactly that failure in the tool meant to catch it.
+	const servedTag = ( display.body.filename ?? '' ).split( '-' )[ 0 ];
+	const servedNote =
+		{
+			[ FILENAME_TAGS.departures ]:
+				'A valid poll, answered. Real predictions for the configured stop, fetched and rendered a moment ago — this is the live image, not a fixture.',
+			[ FILENAME_TAGS.noDepartures ]:
+				'A valid poll, and a real answer: nothing more is scheduled at this stop today. Still a board, because "no more buses" is information and a notice would throw away the other direction to say it.',
+			[ FILENAME_TAGS.upstreamFailed ]:
+				'A valid poll that OneBusAway would not answer. In development that is almost always the shared `TEST` key hitting its rate limit; the log line names the reason.',
+			[ FILENAME_TAGS.renderFailed ]: 'A valid poll that threw on the way to a board.',
+		}[ servedTag ] ?? 'A valid poll.';
+
+	const images = [
+		{
+			tag: servedTag,
+			title: 'What the device would show now',
+			note: servedNote,
+			uri: dataUri( image.bytes ),
+		},
+		{
+			tag: FILENAME_TAGS.badPath,
+			title: 'A mistyped base URL',
+			note: 'The sentence names the wrong segment, and changes with the rejection reason. This one is an invalid agency.',
+			uri: dataUri( badPath.bytes ),
+		},
+		{
+			tag: FILENAME_TAGS.renderFailed,
+			title: 'A render that threw',
+			note: 'Unreachable by request — rendered here directly. Blank time fields are deliberate: `formatBoardTime()` throws on a bad timestamp, and a fabricated clock on a broken screen would be a lie.',
+			uri: dataUri( renderFailedBytes ),
+		},
+	];
+
+	// Only when the live poll did not already produce it, or the same screen would appear twice with
+	// two different captions.
+	if ( servedTag !== FILENAME_TAGS.upstreamFailed ) {
+		images.splice( 1, 0, {
+			tag: FILENAME_TAGS.upstreamFailed,
+			title: 'OneBusAway not answering',
+			note: 'Rendered here directly, because waiting for a real outage means seeing this screen for the first time during the outage it exists to explain.',
+			uri: dataUri( upstreamFailedBytes ),
+		} );
+	}
+
+	const shown = new Set( images.map( ( entry ) => entry.tag ) );
+
 	return {
 		groups,
-		images: [
-			{
-				tag: FILENAME_TAGS.noDepartures,
-				title: 'What the device would show now',
-				note: 'A valid poll. Stays until OneBusAway is wired up.',
-				uri: dataUri( image.bytes ),
-			},
-			{
-				tag: FILENAME_TAGS.badPath,
-				title: 'A mistyped base URL',
-				note: 'The sentence names the wrong segment, and changes with the rejection reason. This one is an invalid agency.',
-				uri: dataUri( badPath.bytes ),
-			},
-			{
-				tag: FILENAME_TAGS.renderFailed,
-				title: 'A render that threw',
-				note: 'Unreachable by request — rendered here directly. Blank time fields are deliberate: `formatBoardTime()` throws on a bad timestamp, and a fabricated clock on a broken screen would be a lie.',
-				uri: dataUri( renderFailedBytes ),
-			},
-		],
-		pending: [
-			{
-				tag: FILENAME_TAGS.departures,
-				note: 'The real board. Needs live OneBusAway data — the next piece of work. Its layout can be seen on the design preview, rendered from real API values.',
-			},
-			{
-				tag: FILENAME_TAGS.upstreamFailed,
-				note: 'OneBusAway down, rate-limited, or answering nonsense. Cannot exist before the fetch it reports on.',
-			},
-		],
+		images,
+		// Whatever is left. Derived rather than listed, so a new `FILENAME_TAGS` entry cannot be added
+		// without either appearing above or admitting on this page that nobody has looked at it.
+		pending: Object.values( FILENAME_TAGS )
+			.filter( ( tag ) => ! shown.has( tag ) )
+			.map( ( tag ) => ( {
+				tag,
+				note:
+					{
+						[ FILENAME_TAGS.departures ]:
+							'The real board. It needs OneBusAway to answer, and this run it did not — the served screen above says what happened instead.',
+						[ FILENAME_TAGS.noDepartures ]:
+							'A stop whose last departure has gone. Reachable only late at night, or at a stop that has stopped running for the day.',
+					}[ tag ] ?? 'Not produced by this run.',
+			} ) ),
 		passed: all.filter( ( entry ) => entry.ok ).length,
 		failed: all.filter( ( entry ) => ! entry.ok ).length,
 	};

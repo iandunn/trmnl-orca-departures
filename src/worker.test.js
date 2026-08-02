@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import worker from './worker.js';
+import busNorth from './oba/fixtures/1_600.json';
+import { clearMemo } from './oba/memo.js';
 import { deriveApiKey } from './byos/credentials.js';
 
 /**
@@ -153,8 +155,26 @@ describe( '/api/display', () => {
 
 		// A degraded screen whose filename collides with a good render is suppressed by the cache and
 		// never reaches the glass.
+		// The test environment configures no `OBA_API_KEY`, so every stop fails to load and the board
+		// drops to the upstream-failure notice. That is the tag being asserted here.
 		it( 'carries the state tag', async () => {
-			expect( ( await displayBody() ).filename.startsWith( 'noservc-' ) ).toBe( true );
+			expect( ( await displayBody() ).filename.startsWith( 'obafail-' ) ).toBe( true );
+		} );
+
+		// The other half of the same rule, and the one that proves the tags are actually reachable: a
+		// board with departures on it must not share a filename shape with the notice that replaces it.
+		it( 'carries the departures tag once OneBusAway answers', async () => {
+			clearMemo();
+			vi.stubGlobal( 'fetch', async () => Response.json( busNorth ) );
+
+			try {
+				const response = await authed( `${ BASE }/api/display`, { ...env, OBA_API_KEY: 'test-key' } );
+
+				expect( ( await response.json() ).filename.startsWith( 'departs-' ) ).toBe( true );
+			} finally {
+				vi.unstubAllGlobals();
+				clearMemo();
+			}
 		} );
 
 		// Minute accuracy on the "Updated at" stamp is the requirement this trades flicker for: the

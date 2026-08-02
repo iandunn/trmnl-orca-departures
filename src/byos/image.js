@@ -18,6 +18,7 @@
  * Serve 200 directly.
  */
 
+import { FILENAME_TAGS } from '../filename.js';
 import { rasterize, pngResponse } from '../render/index.js';
 import { currentScreen } from './display.js';
 
@@ -28,7 +29,30 @@ import { currentScreen } from './display.js';
  * @returns {Promise<{ response: Response, tag: string }>}
  */
 export async function handleImage( request, target, env ) {
-	const { screen, svg } = currentScreen( target, env, Date.now() );
+	// `allowStale` is set here and nowhere else. `/api/display` has already handed the device a
+	// filename derived from a board it built successfully; if OneBusAway then fails between the two
+	// requests, serving an error board under that name paints a failure the device caches as though it
+	// were a good board. Repeating the last good response keeps the bytes close to what the name
+	// promised, and the "Updated at" stamp on them is the honest cue that they are not current.
+	const { screen, svg } = await currentScreen( target, env, Date.now(), { allowStale: true } );
 
-	return { tag: screen.tag, response: pngResponse( await rasterize( svg ) ) };
+	try {
+		return { tag: screen.tag, response: pngResponse( await rasterize( svg ) ) };
+	} catch ( error ) {
+		// `currentScreen()` swallows its own throws, so rasterising is the only thing left that can fail
+		// here — and it fails for the whole panel, which rules out drawing a notice instead, since that
+		// would go through the same rasteriser. A 500 is survivable on this route in a way it is not on
+		// `/api/display`: no `refresh_rate` rides on it, so the worst case is a failed download and the
+		// panel keeping what it already had. Letting it propagate instead would skip `recordOutcome()`
+		// and leave the one endpoint that drew nothing missing from `/stats`.
+		console.log( JSON.stringify( { event: 'byos-image-rasterize-failed', message: String( error ) } ) );
+
+		return {
+			tag: FILENAME_TAGS.renderFailed,
+			response: new Response( 'Render failed', {
+				status: 500,
+				headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+			} ),
+		};
+	}
 }
