@@ -80,6 +80,7 @@ TARPIT_MS = 25000
 # the queries and the bindings cannot drift apart silently.
 ANALYTICS_DATASET = "trmnl_orca_departures_requests"
 DEVICE_LOGS_DATASET = "trmnl_orca_departures_device_logs"
+DEVICE_TELEMETRY_DATASET = "trmnl_orca_departures_devices"
 
 # Request outcomes, for the `/stats` page. Analytics Engine rather than KV, and the reason is worth
 # keeping written down: KV's free write quota is 1000 a day and this sign alone polls roughly 1440
@@ -113,6 +114,22 @@ dataset = "trmnl_orca_departures_requests"
 [[analytics_engine_datasets]]
 binding = "DEVICE_LOGS"
 dataset = "trmnl_orca_departures_device_logs"
+
+# What the device reports about itself on every wake — MAC address, firmware build, panel geometry,
+# battery and WiFi. Written by `recordDeviceTelemetry()` in `src/stats/device-telemetry.js` and read
+# back by the Devices panel on `/stats`.
+#
+# **This is separate because Analytics Engine accepts twenty blobs per row and rejects the whole row
+# past that.** These columns were appended to the requests schema on 2026-08-02, took it to
+# twenty-eight, and silently stopped every write for a full deploy cycle — no request outcomes, no
+# rejections, nothing, with the page still rendering. `assertWithinLimits()` now throws at module
+# load so the same mistake fails a `wrangler deploy --dry-run` instead of a day of data.
+#
+# The split is right on its own terms too: these describe a device rather than a request, and most
+# rows in the requests dataset are scanner traffic where every one of them would be empty.
+[[analytics_engine_datasets]]
+binding = "DEVICE_TELEMETRY"
+dataset = "trmnl_orca_departures_devices"
 
 # Required for the bundled font, or the static import fails.
 #

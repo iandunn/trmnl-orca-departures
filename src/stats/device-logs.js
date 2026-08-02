@@ -19,7 +19,10 @@
  *
  * The same rule as the request schema applies, for the same reason: **blob and double positions are
  * permanent, append only.** Inserting a field mid-list silently reinterprets every historical row.
+ * The twenty-column ceiling applies here too, and is asserted at module load below.
  */
+
+import { assertWithinLimits } from './schema.js';
 
 /** A numeric field the entry did not carry. Matches the request schema's convention. */
 export const ABSENT_NUMBER = -1;
@@ -69,6 +72,8 @@ export const LOG_DOUBLE_FIELDS = [
 	{ name: 'wifiSignal' },
 	{ name: 'messageBytes' },
 ];
+
+assertWithinLimits( 'The device log schema', LOG_BLOB_FIELDS, LOG_DOUBLE_FIELDS );
 
 const logBlobIndex = new Map( LOG_BLOB_FIELDS.map( ( field, index ) => [ field.name, index + 1 ] ) );
 const logDoubleIndex = new Map( LOG_DOUBLE_FIELDS.map( ( field, index ) => [ field.name, index + 1 ] ) );

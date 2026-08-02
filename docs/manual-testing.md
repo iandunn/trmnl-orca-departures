@@ -147,6 +147,41 @@ curl -s -H "Access-Token: $KEY" \
 
 A missing or stale `Access-Token` on `/api/display` or `/api/log` is a `404` too, byte-identical to the others.
 
+## Clearing the `/stats` data
+
+Everything the exercises above record is development traffic, and it does not age out quickly. Left in place it skews every number on `/stats` permanently, and it ruins the panels that matter most on day one: Device identity is built to make a *single* deviation legible, and it cannot do that against a background of test rows from a dozen shapes of request.
+
+**Analytics Engine has no delete, and this is not a gap in your permissions.** Verified against the API on 2026-08-02:
+
+```bash
+# All four are rejected outright.
+DELETE FROM <dataset>          # unsupported SQL statement type
+TRUNCATE TABLE <dataset>       # unsupported SQL statement type
+DROP TABLE <dataset>           # unsupported SQL statement type
+ALTER TABLE <dataset> DELETE   # sql parser error
+```
+
+The SQL API accepts `SELECT` and `SHOW TABLES` and nothing else. There is no dataset-management REST endpoint either — `/accounts/<id>/analytics_engine/datasets` is a 404, and a `DELETE` against a dataset path is a 403. Rows age out on Analytics Engine's own retention, which is why the range picker on `/stats` stops at 90 days, and not one moment sooner.
+
+**So the way to start clean is to write to new datasets.** Rename all three in `wrangler.toml` — the `[vars]` entry *and* the matching binding, six values in total — then `npm run deploy`. A `_v2` suffix is enough:
+
+| Var | Binding | Holds |
+| --- | --- | --- |
+| `ANALYTICS_DATASET` | `ANALYTICS` | Request outcomes: every poll, every rejection, every probe |
+| `DEVICE_LOGS_DATASET` | `DEVICE_LOGS` | `/api/log` entries |
+| `DEVICE_TELEMETRY_DATASET` | `DEVICE_TELEMETRY` | Per-device telemetry: MAC, firmware, battery, WiFi |
+
+Four things to get right, since a half-done rename is worse than not doing it:
+
+- **The var and the binding must move together.** They are separate values that have to match, which is exactly why they are vars rather than hardcoded: `/stats` queries the name in the var and the Worker writes to the name on the binding. If they drift, the page reads an empty dataset while the writes land somewhere else — and it looks identical to a sign nothing has found.
+- **All three, not just the requests one.** Each carries its own development noise, and clearing one of three leaves the page mixing a clean dataset with two dirty ones.
+- **Nothing needs creating first.** An Analytics Engine dataset springs into existence on its first write, so a name nobody has written to yet simply reads as empty. That is also why a fresh name gives no error before the first row lands.
+- **Verify by reading, not by deploying.** Load `/stats` and confirm it is empty, then make one request and confirm exactly one row appears. A successful deploy proves nothing about which dataset is being written.
+
+The old datasets are left behind rather than removed. They cost nothing, are no longer queried by anything, and expire on their own.
+
+Worth doing at the same time: decide whether `byos-unimplemented` still needs its comment in `OUTCOMES`. It was kept only because retired values were already in the dataset, and a fresh dataset removes that reason.
+
 ## Before pasting any of this anywhere
 
 Three things in the output are not shareable, and two of them are easy to miss:

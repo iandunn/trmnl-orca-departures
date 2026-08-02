@@ -12,7 +12,7 @@
 import { currentScreen } from '../byos/display.js';
 import { readConfig } from '../config.js';
 import { rasterize, renderBoard } from '../render/index.js';
-import { buildMockStatsData, renderStatsHtml } from '../stats/render.js';
+import { buildMockStatsData, buildUnpairedMockStatsData, renderStatsHtml } from '../stats/render.js';
 import { runByosChecks } from './byos-check.js';
 import { renderByosCheckHtml } from './byos-page.js';
 import { edgeCaseBoards } from './edge-case-boards.js';
@@ -110,7 +110,8 @@ function contactSheet( boards, nowParam, { heading = '', extraNav = '' } = {} ) 
 		`<h1>${ heading || '1872 &times; 1404 &middot; 4-bit greyscale &middot; shown at 50% &middot; reload to re-render' }</h1>` +
 		`<nav>${ nav }<a href="${ PREVIEW_PREFIX }?now=live">render at the real clock</a>` +
 		`<a href="${ PREVIEW_PREFIX }/byos">BYOS self-check</a>` +
-		`<a href="${ PREVIEW_PREFIX }/stats">stats page (mock data)</a>${ extraNav }</nav>${ cards }`
+		`<a href="${ PREVIEW_PREFIX }/stats">stats page (mock data)</a>` +
+		`<a href="${ PREVIEW_PREFIX }/stats?unpaired">stats page (no device yet)</a>${ extraNav }</nav>${ cards }`
 	);
 }
 
@@ -130,7 +131,13 @@ export async function handlePreview( request, env ) {
 	// dataset, a deploy, or waiting for the sign to generate interesting failures. It renders through
 	// exactly the function the real route uses, so what is seen here is what ships.
 	if ( pathname === `${ PREVIEW_PREFIX }/stats` ) {
-		return new Response( renderStatsHtml( buildMockStatsData( url.searchParams.get( 'range' ) ) ), {
+		// `?unpaired` is the page as it looks before a device has ever polled, which is a distinct
+		// design state rather than an edge case — it is what the owner stares at for the whole gap
+		// between deploying and pairing, and it was never looked at until it was found to be
+		// describing a device that did not exist.
+		const build = url.searchParams.has( 'unpaired' ) ? buildUnpairedMockStatsData : buildMockStatsData;
+
+		return new Response( renderStatsHtml( build( url.searchParams.get( 'range' ) ) ), {
 			headers: { 'Content-Type': 'text/html; charset=utf-8' },
 		} );
 	}

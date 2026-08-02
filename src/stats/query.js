@@ -17,8 +17,9 @@
  */
 
 import { OUTCOMES } from '../abuse.js';
-import { blobColumn, doubleColumn, ABSENT_NUMBER } from './schema.js';
+import { blobColumn, ABSENT_NUMBER } from './schema.js';
 import { logBlobColumn, logDoubleColumn } from './device-logs.js';
+import { deviceBlobColumn, deviceDoubleColumn } from './device-telemetry.js';
 
 const SQL_ENDPOINT = 'https://api.cloudflare.com/client/v4/accounts';
 
@@ -141,6 +142,13 @@ export async function buildStatsData( env, config, rangeKey ) {
 	const range = resolveRange( rangeKey );
 	const dataset = env?.ANALYTICS_DATASET || 'trmnl_orca_departures_requests';
 	const logDataset = env?.DEVICE_LOGS_DATASET || 'trmnl_orca_departures_device_logs';
+
+	// Every row here came from a request carrying device headers, so the panels below need no
+	// `authorized` filter and — more usefully — cannot pick up the owner's own `curl`. That is not a
+	// nicety: two hand-made requests were enough to make `/stats` report a firmware build of "unknown"
+	// on a panel of -1 by -1, which reads as a device in trouble rather than as no device at all.
+	const deviceDataset = env?.DEVICE_TELEMETRY_DATASET || 'trmnl_orca_departures_devices';
+
 	const days = range.days;
 
 	const authorizedOnly = `${ blobColumn( 'authorized' ) } = '1'`;
@@ -187,36 +195,34 @@ export async function buildStatsData( env, config, rangeKey ) {
 
 		run(
 			groupQuery( {
-				dataset,
+				dataset: deviceDataset,
 				columns: [
-					blobColumn( 'firmwareVersion' ),
-					blobColumn( 'model' ),
-					doubleColumn( 'width' ),
-					doubleColumn( 'height' ),
+					deviceBlobColumn( 'firmwareVersion' ),
+					deviceBlobColumn( 'model' ),
+					deviceDoubleColumn( 'width' ),
+					deviceDoubleColumn( 'height' ),
 				],
-				where: authorizedOnly,
 				days,
 			} )
 		),
 
-		run( groupQuery( { dataset, columns: [ blobColumn( 'imageCached' ) ], where: authorizedOnly, days } ) ),
+		run( groupQuery( { dataset: deviceDataset, columns: [ deviceBlobColumn( 'imageCached' ) ], days } ) ),
 
-		run( groupQuery( { dataset, columns: [ doubleColumn( 'refreshRateEcho' ) ], where: authorizedOnly, days } ) ),
+		run( groupQuery( { dataset: deviceDataset, columns: [ deviceDoubleColumn( 'refreshRateEcho' ) ], days } ) ),
 
 		run( `
 			SELECT
 				toStartOfInterval(timestamp, INTERVAL '6' HOUR) AS bucket,
-				AVG(${ doubleColumn( 'batteryVoltage' ) }) AS voltage,
-				AVG(${ doubleColumn( 'percentCharged' ) }) AS percent,
+				AVG(${ deviceDoubleColumn( 'batteryVoltage' ) }) AS voltage,
+				AVG(${ deviceDoubleColumn( 'percentCharged' ) }) AS percent,
 				-- WiFi signal shares the battery's bucketing because it is read the same way: one value
 				-- per poll, from a header, meaningful only as a trend. A falling RSSI is the earliest
 				-- warning this sign can produce — the device goes quiet long after the signal starts
 				-- degrading, so a line that sags for a week is the only lead time there is.
-				AVG(${ doubleColumn( 'signalStrength' ) }) AS signal
-			FROM ${ dataset }
+				AVG(${ deviceDoubleColumn( 'signalStrength' ) }) AS signal
+			FROM ${ deviceDataset }
 			WHERE timestamp > NOW() - INTERVAL '${ days }' DAY
-				AND ${ authorizedOnly }
-				AND ${ doubleColumn( 'percentCharged' ) } > ${ ABSENT_NUMBER }
+				AND ${ deviceDoubleColumn( 'percentCharged' ) } > ${ ABSENT_NUMBER }
 			GROUP BY bucket
 			ORDER BY bucket ASC
 			LIMIT 400
@@ -224,7 +230,7 @@ export async function buildStatsData( env, config, rangeKey ) {
 
 		run( groupQuery( { dataset, columns: [ blobColumn( 'filenameTag' ) ], where: authorizedOnly, days } ) ),
 
-		// The most recent authenticated polls, with every device column on them.
+		// The most recent device polls, with every device column on them.
 		//
 		// **Raw rows rather than a `GROUP BY`, because "latest" is the question.** Grouping would need
 		// `argMax` per column, which this SQL surface may or may not support, and the aggregate a
@@ -234,32 +240,32 @@ export async function buildStatsData( env, config, rangeKey ) {
 		run( `
 			SELECT
 				timestamp,
-				${ blobColumn( 'deviceId' ) } AS device_id,
-				${ blobColumn( 'model' ) } AS model,
-				${ blobColumn( 'firmwareVersion' ) } AS firmware_version,
-				${ blobColumn( 'firmwareCommit' ) } AS firmware_commit,
-				${ blobColumn( 'clientIp' ) } AS client_ip,
-				${ blobColumn( 'networkOrganization' ) } AS organization,
-				${ blobColumn( 'country' ) } AS country,
-				${ blobColumn( 'wifiBand' ) } AS wifi_band,
-				${ blobColumn( 'batteryCharging' ) } AS battery_charging,
-				${ blobColumn( 'usbConnected' ) } AS usb_connected,
-				${ blobColumn( 'batteryCapacity' ) } AS battery_capacity,
-				${ blobColumn( 'imageCached' ) } AS image_cached,
-				${ blobColumn( 'updateSource' ) } AS update_source,
-				${ blobColumn( 'wakeTime' ) } AS wake_time,
-				${ blobColumn( 'outcome' ) } AS outcome,
-				${ blobColumn( 'filenameTag' ) } AS filename_tag,
-				${ blobColumn( 'upstreamReason' ) } AS upstream_reason,
-				${ doubleColumn( 'signalStrength' ) } AS signal,
-				${ doubleColumn( 'batteryVoltage' ) } AS voltage,
-				${ doubleColumn( 'percentCharged' ) } AS percent,
-				${ doubleColumn( 'batteryTemperature' ) } AS battery_temp,
-				${ doubleColumn( 'refreshRateEcho' ) } AS refresh_rate,
-				${ doubleColumn( 'width' ) } AS width,
-				${ doubleColumn( 'height' ) } AS height
-			FROM ${ dataset }
-			WHERE timestamp > NOW() - INTERVAL '${ days }' DAY AND ${ authorizedOnly }
+				${ deviceBlobColumn( 'deviceId' ) } AS device_id,
+				${ deviceBlobColumn( 'model' ) } AS model,
+				${ deviceBlobColumn( 'firmwareVersion' ) } AS firmware_version,
+				${ deviceBlobColumn( 'firmwareCommit' ) } AS firmware_commit,
+				${ deviceBlobColumn( 'clientIp' ) } AS client_ip,
+				${ deviceBlobColumn( 'networkOrganization' ) } AS organization,
+				${ deviceBlobColumn( 'country' ) } AS country,
+				${ deviceBlobColumn( 'wifiBand' ) } AS wifi_band,
+				${ deviceBlobColumn( 'batteryCharging' ) } AS battery_charging,
+				${ deviceBlobColumn( 'usbConnected' ) } AS usb_connected,
+				${ deviceBlobColumn( 'batteryCapacity' ) } AS battery_capacity,
+				${ deviceBlobColumn( 'imageCached' ) } AS image_cached,
+				${ deviceBlobColumn( 'updateSource' ) } AS update_source,
+				${ deviceBlobColumn( 'wakeTime' ) } AS wake_time,
+				${ deviceBlobColumn( 'outcome' ) } AS outcome,
+				${ deviceBlobColumn( 'filenameTag' ) } AS filename_tag,
+				${ deviceBlobColumn( 'upstreamReason' ) } AS upstream_reason,
+				${ deviceDoubleColumn( 'signalStrength' ) } AS signal,
+				${ deviceDoubleColumn( 'batteryVoltage' ) } AS voltage,
+				${ deviceDoubleColumn( 'percentCharged' ) } AS percent,
+				${ deviceDoubleColumn( 'batteryTemperature' ) } AS battery_temp,
+				${ deviceDoubleColumn( 'refreshRateEcho' ) } AS refresh_rate,
+				${ deviceDoubleColumn( 'width' ) } AS width,
+				${ deviceDoubleColumn( 'height' ) } AS height
+			FROM ${ deviceDataset }
+			WHERE timestamp > NOW() - INTERVAL '${ days }' DAY
 			ORDER BY timestamp DESC
 			LIMIT 50
 		` ),
@@ -288,9 +294,9 @@ export async function buildStatsData( env, config, rangeKey ) {
 		// would dwarf every bar worth reading.
 		run(
 			groupQuery( {
-				dataset,
-				columns: [ blobColumn( 'upstreamReason' ) ],
-				where: `${ blobColumn( 'upstreamReason' ) } != ''`,
+				dataset: deviceDataset,
+				columns: [ deviceBlobColumn( 'upstreamReason' ) ],
+				where: `${ deviceBlobColumn( 'upstreamReason' ) } != ''`,
 				days,
 			} )
 		),
@@ -447,6 +453,17 @@ export async function buildStatsData( env, config, rangeKey ) {
 			networksError: networks.error,
 			firmware: rowsToGroups( firmware.data, [ 'firmwareVersion', 'model', 'width', 'height' ] ),
 			firmwareError: firmware.error,
+
+			// Whether any device has polled in this window at all.
+			//
+			// Every check in the identity panel is a comparison against what a paired sign looks like,
+			// and none of them means anything before one exists — a poll count of 2 against an expected
+			// 12,614 is not a quiet alarm, it is a question nobody asked yet. So the panel needs to know
+			// the difference between "nothing is wrong" and "there is nothing to be wrong about", and
+			// this is it. Taken from the device dataset rather than from the authenticated request count,
+			// because the owner's own `curl` authenticates and is not a device.
+			deviceCount: devices.length,
+			deviceCountError: deviceRows.error,
 			setupCalls,
 			enrollments: rowsToGroups( enrollments.data, [ 'country', 'organization', 'model', 'firmwareVersion' ] ),
 			enrollmentsError: enrollments.error,

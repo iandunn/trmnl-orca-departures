@@ -3,11 +3,16 @@ import {
 	ABSENT_NUMBER,
 	BLOB_FIELDS,
 	DOUBLE_FIELDS,
+	MAX_BLOBS,
+	MAX_DOUBLES,
+	assertWithinLimits,
 	blobColumn,
 	doubleColumn,
 	eventFromRequest,
 	safeProbePath,
 } from './schema.js';
+import { DEVICE_BLOB_FIELDS, DEVICE_DOUBLE_FIELDS } from './device-telemetry.js';
+import { LOG_BLOB_FIELDS, LOG_DOUBLE_FIELDS } from './device-logs.js';
 import { OUTCOMES, REJECTION_REASONS } from '../abuse.js';
 import { ROUTES } from '../routing.js';
 
@@ -87,14 +92,6 @@ describe( 'BLOB_FIELDS and DOUBLE_FIELDS', () => {
 			'userAgent',
 			'probePath',
 			'authorized',
-			'upstreamReason',
-			'deviceId',
-			'clientIp',
-			'wifiBand',
-			'firmwareCommit',
-			'batteryCharging',
-			'usbConnected',
-			'temperatureProfile',
 		] );
 	} );
 
@@ -114,18 +111,58 @@ describe( 'BLOB_FIELDS and DOUBLE_FIELDS', () => {
 	} );
 } );
 
+/**
+ * The ceiling that was missing on 2026-08-02, when the request schema grew to 28 blobs against
+ * Analytics Engine's limit of 20 and every write was rejected whole — silently, because
+ * `recordRequest()` swallows write errors, for a full deploy cycle, with 739 tests green.
+ *
+ * Every dataset is checked here rather than only the one that broke, because the next dataset is
+ * where the next occurrence would be. `assertWithinLimits()` also throws at module load, which is
+ * the stronger guard: these tests pin the shape, that throw stops a deploy.
+ */
+describe( 'the Analytics Engine column ceiling', () => {
+	it.each( [
+		[ 'request', BLOB_FIELDS, DOUBLE_FIELDS ],
+		[ 'device telemetry', DEVICE_BLOB_FIELDS, DEVICE_DOUBLE_FIELDS ],
+		[ 'device log', LOG_BLOB_FIELDS, LOG_DOUBLE_FIELDS ],
+	] )( 'keeps the %s schema within twenty of each', ( _name, blobs, doubles ) => {
+		expect( blobs.length ).toBeLessThanOrEqual( MAX_BLOBS );
+		expect( doubles.length ).toBeLessThanOrEqual( MAX_DOUBLES );
+	} );
+
+	it( 'states the limit as Analytics Engine documents it', () => {
+		expect( MAX_BLOBS ).toBe( 20 );
+		expect( MAX_DOUBLES ).toBe( 20 );
+	} );
+
+	// The message has to name the dataset and the way out, because the symptom gives neither: the
+	// dataset simply stops gaining rows, and the obvious reading of "over the limit" is to drop a
+	// field rather than to move it.
+	it( 'throws with the dataset named when a schema is over', () => {
+		const tooMany = Array.from( { length: MAX_BLOBS + 1 }, ( _value, index ) => ( { name: `f${ index }` } ) );
+
+		expect( () => assertWithinLimits( 'The made-up schema', tooMany, [] ) ).toThrow( RangeError );
+		expect( () => assertWithinLimits( 'The made-up schema', tooMany, [] ) ).toThrow( /made-up schema/ );
+		expect( () => assertWithinLimits( 'The made-up schema', [], tooMany ) ).toThrow( /own dataset/ );
+	} );
+
+	it( 'accepts a schema exactly at the limit', () => {
+		const exactly = Array.from( { length: MAX_BLOBS }, ( _value, index ) => ( { name: `f${ index }` } ) );
+
+		expect( () => assertWithinLimits( 'The made-up schema', exactly, exactly ) ).not.toThrow();
+	} );
+} );
+
 describe( 'blobColumn and doubleColumn', () => {
 	it.each( [
 		[ 'outcome', 'blob1' ],
 		[ 'stopIds', 'blob5' ],
 		[ 'country', 'blob14' ],
-		// Pinned by absolute position, not as "the last one". `authorized` was last until
-		// `upstreamReason` was appended on 2026-08-01, and a relative assertion would have followed it
-		// silently — which is the one thing this test exists to prevent, since a column that moves
-		// reinterprets every historical row.
+		// Pinned by absolute position, never as "the last one". A relative assertion follows a column
+		// that moved, which is the one thing this test exists to prevent — a moved column reinterprets
+		// every historical row. `blob20` is also the last slot Analytics Engine has, so this doubles as
+		// the marker that the list is full: the next field goes in another dataset.
 		[ 'authorized', 'blob20' ],
-		[ 'upstreamReason', 'blob21' ],
-		[ 'temperatureProfile', `blob${ BLOB_FIELDS.length }` ],
 	] )( 'maps the %s blob to %s', ( name, column ) => {
 		expect( blobColumn( name ) ).toBe( column );
 	} );

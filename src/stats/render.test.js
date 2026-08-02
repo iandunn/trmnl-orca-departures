@@ -26,6 +26,8 @@ function emptyData() {
 			setupCalls: 0,
 			authorizedRequests: 0,
 			expectedRequests: 8064,
+			deviceCount: 0,
+			deviceCountError: '',
 		},
 		panel: { imageCached: [], imageCachedError: '', refreshEcho: [], refreshEchoError: '' },
 		battery: { series: [], error: '' },
@@ -211,9 +213,18 @@ describe( 'zero data', () => {
 	it( 'explains the empty state rather than looking broken', () => {
 		const html = renderStatsHtml( emptyData() );
 
-		expect( html ).toContain( 'That is the expected state' );
-		expect( html ).toContain( 'until the BYOS endpoints exist' );
+		expect( html ).toContain( 'that is expected' );
 		expect( html ).toContain( 'Device identity' );
+	} );
+
+	// The banner is the only thing on the page when the dataset is empty, and an empty dataset has two
+	// causes that look identical: nothing arrived, or every write was rejected. It claimed only the
+	// first until 2026-08-02, which is the day the second one happened.
+	it( 'names rejected writes as the other reason the dataset can be empty', () => {
+		const html = renderStatsHtml( emptyData() );
+
+		expect( html ).toContain( 'the writes are being rejected' );
+		expect( html ).toContain( 'npm run tail' );
 	} );
 
 	it( 'renders a quiet "none" for each empty panel', () => {
@@ -225,8 +236,8 @@ describe( 'zero data', () => {
 	// read as though it had half-failed.
 	it.each( [
 		[ 'panel health', 'nothing has reported a cache result' ],
-		[ 'battery', 'reported no battery readings' ],
-		[ 'device logs', 'no way to file one' ],
+		[ 'battery', 'nothing has reported a battery reading' ],
+		[ 'device logs', 'has not hit anything worth reporting' ],
 	] )( 'does not print a bare "none" under the %s explanation', ( _label, explanation ) => {
 		const html = renderStatsHtml( emptyData() );
 		const afterExplanation = html.slice( html.indexOf( explanation ) + explanation.length );
@@ -245,7 +256,96 @@ describe( 'zero data', () => {
 		const html = renderStatsHtml( data );
 
 		expect( html ).toContain( 'query failed: SQL API HTTP 403' );
-		expect( html ).not.toContain( 'That is the expected state' );
+		expect( html ).not.toContain( 'that is expected' );
+	} );
+} );
+
+/**
+ * The unpaired state.
+ *
+ * Everything in the identity panel is a comparison against what a paired sign looks like, and the
+ * page had no way to say there was nothing to compare — so two hand-made `curl` calls rendered as a
+ * device on an unknown firmware build with a panel of -1 by -1 and a poll count 12,000 short of
+ * expectation, every line of it labelled `ok`.
+ */
+describe( 'before any device has polled', () => {
+	it( 'says so once, plainly, rather than leaving it to be inferred', () => {
+		const html = renderStatsHtml( emptyData() );
+
+		expect( html ).toContain( 'Paired device' );
+		expect( html ).toContain( 'No device has polled in this window' );
+	} );
+
+	it( 'withholds the expected poll count instead of showing a 12,000-poll shortfall', () => {
+		const html = renderStatsHtml( emptyData() );
+
+		expect( html ).toContain( 'Nothing to compare yet' );
+		expect( html ).not.toContain( '8,064 expected' );
+	} );
+
+	it( 'raises no alarm, because an unpaired sign is not a fault', () => {
+		expect( renderStatsHtml( emptyData() ) ).not.toContain( 'class="check alarm"' );
+	} );
+
+	// A failed query returns zero rows, and "no device has polled" is a claim rather than a default.
+	// Without this the page would answer a broken query with a confident statement about hardware.
+	it( 'does not claim an unpaired sign when the device query failed', () => {
+		const data = emptyData();
+
+		data.identity.deviceCountError = 'SQL API HTTP 422';
+
+		const html = renderStatsHtml( data );
+
+		expect( html ).not.toContain( 'Paired device' );
+		expect( html ).not.toContain( 'Nothing to compare yet' );
+	} );
+
+	it( 'drops the unpaired copy once a device appears', () => {
+		const html = renderStatsHtml( buildMockStatsData( '7d' ) );
+
+		expect( html ).not.toContain( 'Paired device' );
+		expect( html ).toContain( 'authenticated vs' );
+	} );
+} );
+
+/**
+ * No panel may print reassurance beside its own error.
+ *
+ * The rule was written down for the device-logs panel and applied nowhere else, so `/stats` rendered
+ * "every stop answered on every poll in this window" directly under the 422 from the query that
+ * would have found out. The sentence is the part a reader believes.
+ */
+describe( 'empty states beside a failed query', () => {
+	it.each( [
+		[ 'upstreamReasons', 'error', 'every stop answered' ],
+		[ 'renderOutcomes', 'error', 'nothing has been rendered yet' ],
+		[ 'battery', 'error', 'nothing has reported a battery reading' ],
+	] )( 'withholds the %s empty state when its query failed', ( section, key, sentence ) => {
+		const clean = emptyData();
+
+		expect( renderStatsHtml( clean ) ).toContain( sentence );
+
+		const broken = emptyData();
+
+		broken[ section ][ key ] = 'SQL API HTTP 422';
+
+		const html = renderStatsHtml( broken );
+
+		expect( html ).toContain( 'query failed: SQL API HTTP 422' );
+		expect( html ).not.toContain( sentence );
+	} );
+
+	it.each( [
+		[ 'imageCachedError', 'nothing has reported a cache result' ],
+		[ 'refreshEchoError', 'no device has reported a refresh rate yet' ],
+	] )( 'withholds the panel-health empty state keyed on %s', ( key, sentence ) => {
+		expect( renderStatsHtml( emptyData() ) ).toContain( sentence );
+
+		const broken = emptyData();
+
+		broken.panel[ key ] = 'SQL API HTTP 422';
+
+		expect( renderStatsHtml( broken ) ).not.toContain( sentence );
 	} );
 } );
 
@@ -400,10 +500,14 @@ describe( 'device logs', () => {
 		expect( deviceLogsPanel( html ) ).toContain( '&lt;img src=x onerror=alert(3)&gt;' );
 	} );
 
-	it( 'calls an empty panel expected state, because /api/log is not implemented yet', () => {
+	// The copy said `/api/log` was unimplemented long after it landed, which would have read a real
+	// outage as expected state. Pinned as an assertion that the endpoint is described as working, so
+	// the same drift fails a test rather than sitting on the page.
+	it( 'calls an empty panel expected state without claiming the endpoint is missing', () => {
 		const html = deviceLogsPanel( renderStatsHtml( emptyData() ) );
 
-		expect( html ).toContain( 'no way to file one' );
+		expect( html ).toContain( 'implemented and reachable' );
+		expect( html ).not.toContain( 'not implemented' );
 		expect( html ).not.toContain( '<table' );
 	} );
 

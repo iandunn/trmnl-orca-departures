@@ -57,9 +57,23 @@ export function recordRequest( env, options ) {
 
 	try {
 		env.ANALYTICS.writeDataPoint( eventFromRequest( options ) );
-	} catch {
-		// A metrics write is never worth an outage. Swallowed deliberately, and not logged: the only
-		// plausible causes are a malformed row or a binding misconfiguration, both of which show up
-		// as a suspiciously empty `/stats` page rather than needing a console line per request.
+	} catch ( error ) {
+		// A metrics write is never worth an outage, so the failure is swallowed — but it is **logged**,
+		// which it was not until 2026-08-02.
+		//
+		// The original reasoning was that a rejected write "shows up as a suspiciously empty `/stats`
+		// page rather than needing a console line per request". That turned out to be exactly backwards:
+		// an empty page is also what a Worker nothing has found looks like, and the page said so in a
+		// reassuring banner. A whole day of every request being dropped read as a quiet week.
+		//
+		// One line per failed write is affordable — the free plan retains 200,000 logs a day and this
+		// sign polls under a thousand times — and `npm run tail` is the first place anyone looks.
+		console.log(
+			JSON.stringify( {
+				event: 'analytics-write-failed',
+				dataset: 'requests',
+				message: error?.message ?? String( error ),
+			} )
+		);
 	}
 }

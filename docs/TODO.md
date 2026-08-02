@@ -8,7 +8,7 @@ Organised into **phases**, roughly largest scope first. Phase 1 is everything th
 
 **The whole server is built and deployed.** The design lives in `src/` and is reproducible from source; the four device routes serve live OneBusAway departures; the request gate, `/stats`, the refresh schedule and the overnight screen are all in. Tests and lint are clean as of 2026-08-02.
 
-Deployed to `trmnl-orca-departures.ian-dunn.workers.dev` with both Analytics Engine datasets bound and all five secrets set — `ANALYTICS_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DEVICE_TOKEN`, `OBA_API_KEY`, `STATS_PASSWORD`. **There is no deploy blocker left.** No device has been paired.
+Deployed to `trmnl-orca-departures.ian-dunn.workers.dev` with all three Analytics Engine datasets bound and all five secrets set — `ANALYTICS_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `DEVICE_TOKEN`, `OBA_API_KEY`, `STATS_PASSWORD`. **There is no deploy blocker left.** No device has been paired.
 
 Settled and written up in `CLAUDE.md`: the Metro-faithful layout, real-time vs scheduled (Metro's own `Scheduled`-above-the-time treatment), Fira Sans, the two-stop grouping with direction bands, circle badges for light rail, the OneBusAway footer mark, the sample stops, and the schedule.
 
@@ -65,6 +65,8 @@ Written as each piece landed. These are live constraints on the next change, not
 	A `console.log` of the same entries is complementary and worth keeping — that is the live `wrangler tail` view. It is **not** a substitute for the dataset: `[observability.logs]` retains console output for a few days in a separate store that cannot be queried alongside the request rows explaining what the device was reacting to, and the entries that matter arrive during a failure, which is exactly when nobody is watching a tail.
 
 - **Analytics Engine columns are positional and permanent.** `BLOB_FIELDS` and `DOUBLE_FIELDS` in `src/stats/schema.js` are the schema. **Append only** — inserting a field mid-list silently reinterprets every historical row, with no migration and no way to notice afterwards except that the numbers look wrong.
+
+	**And there are only 20 slots of each, after which the row is rejected whole.** The requests schema is full at 20; anything new goes in another dataset, which is what `src/stats/device-telemetry.js` is. `assertWithinLimits()` throws at module load and `npm run deploy` runs the tests, because `wrangler deploy --dry-run` does not execute top-level code and reports a clean upload on an over-long schema. Overrunning this stopped **every** analytics write for a full deploy cycle on 2026-08-02 with nothing on the page saying so; see `CLAUDE.md`.
 
 - **The token is never recorded, only a 4-byte fingerprint.** Raw paths are never recorded either, except for unauthenticated requests, which go through `safeProbePath()` — an allow-list that keeps `/wp-login.php` and replaces anything long or high-entropy with `[redacted]`, because a URL one character away from ours would otherwise write the live shared secret into the dataset.
 
@@ -190,6 +192,8 @@ These are the ones where the sign is *wrong* rather than *degraded*, which is wo
 
 - [ ] **Handle "running late" / "ahead of schedule"** when OBA reports it.
 
+- [ ] **Settle what `Wake-Time` actually means — `/stats` currently labels it with a unit that may be wrong.** `deviceBox()` in `src/stats/render.js` prints it as `${wakeTime} ms` under "Awake last cycle", but the value in the fixtures is `1785564693`, which is an epoch rather than a duration. One of the two is wrong and neither can be settled from the sources here. It is stored verbatim as text in `src/stats/device-telemetry.js` precisely so that no guess is baked into the data — but the *page* still commits to a reading. Confirm against the first real poll, then either fix the label or the parse. Cheap, and invisible until someone trusts the number.
+
 - [ ] **Pin every `/stats` filter against the `OUTCOMES` constant it is meant to match.** The enrollment alarm — the clearest signal that something other than your device holds the URL — was dead from the day it was written, because `query.js` compared against `'setup'` while the recorded value has always been `'byos-setup'`. Fixed 2026-08-02, but nothing would have caught it: the tests assert the page renders, not that its filters match values the writer actually emits. Cheap to add alongside the failure-mode sweep, and this class of bug is silent by construction — a filter that matches nothing looks exactly like a thing that never happened.
 
 ## Quick wins
@@ -238,17 +242,9 @@ Run this block before first contact with the device. It is what closes phase 1.
 
 ## Do this first, before the device is ever pointed at the Worker
 
-- [ ] **Clear out the `/stats` data so the device starts against a clean slate.** Everything recorded so far is development traffic — `wrangler dev` polls, hand-run `curl`s, `byos-check` runs, the deliberate bad-token and probe tests. Left in place it permanently skews every number on the page, and the panels that matter most on day one are exactly the ones it ruins: "device identity" is built to make a *single* deviation legible, and it cannot do that against a background of test rows from a dozen different shapes of request.
+- [ ] **Clear out the `/stats` data so the device starts against a clean slate.** Everything recorded so far is development traffic — `wrangler dev` polls, hand-run `curl`s, `byos-check` runs, the deliberate bad-token and probe tests. Left in place it permanently skews every number on the page, and the panels that matter most on day one are exactly the ones it ruins: Device identity is built to make a *single* deviation legible, and it cannot do that against a background of test rows from a dozen different shapes of request.
 
-	**Analytics Engine has no delete.** There is no purge API and no dashboard button; rows age out on their own retention and not before. So the way to start clean is to **write to new datasets** — change the `dataset` on both `[[analytics_engine_datasets]]` bindings in `wrangler.toml` and the matching `ANALYTICS_DATASET` / `DEVICE_LOGS_DATASET` vars, then redeploy. Suffixing something like `_v2` is enough.
-
-	Three things to get right, since a half-done rename is worse than not doing it:
-
-	- **The var and the binding must move together.** They are separate values that have to match, which is exactly why they are vars rather than hardcoded — `/stats` queries the name in the var, the Worker writes to the name on the binding, and if they drift the page silently reads an empty dataset while the writes land somewhere else.
-	- **Both datasets, not just the requests one.** `DEVICE_LOGS` carries the same development noise.
-	- **Verify by reading, not by deploying.** Load `/stats` after the redeploy and confirm it is empty, then make one authenticated request and confirm exactly one row appears.
-
-	Worth doing at the same time: decide whether `byos-unimplemented` still needs its comment in `OUTCOMES`. It was kept only because retired values were already in the dataset — a fresh dataset removes that reason.
+	**The procedure is in [`manual-testing.md`](manual-testing.md#clearing-the-stats-data)** — Analytics Engine has no delete, so it means renaming all three datasets and redeploying. Do it there rather than duplicating it here; it has the traps, and a half-done rename is worse than not doing it.
 
 ## Cannot be closed without hardware
 
@@ -312,11 +308,11 @@ Do not pre-solve any of these. Each is cheap to fix if it appears and wasted wor
 
 - [ ] **Subset the font.** `@expo-google-fonts/fira-sans` was picked because it ships real TTFs where fontsource ships none, and it drags in the full weight range plus a `.ttf.png` preview per face. `docs/plans/initial-plan.md` always intended a subsetted font (digits + latin) vendored into the repo. Provisional, not the endgame.
 
-- [ ] **Bundle the dark Metro lockup.** `assets/sources/metro-brand/metro-logo-1280.png` is the positive artwork, 1280x458, dark marks on transparent. It is the only thing missing for a **light** badge plate, since the lockup bundled in `src/assets/metro-logo.js` is the *reversed* white version and vanishes on anything pale.
+- [ ] **Convert the dark Metro lockup.** `assets/sources/metro official/King_County_Metro_2008.svg` is the positive artwork: 450x216, black marks with one white element in the emblem. It is the only thing missing for a **light** badge plate, since the lockup bundled in `src/assets/metro-logo.js` is the *reversed* white version and vanishes on anything pale.
 
-	**Not done, because nothing live needs it.** The chosen overnight screen is inked, so it uses the reversed logo we already have; the only variant that wanted a dark one is `logo-plate-inverse-white`, which is parked. Do this when a light-panel variant is actually picked.
+	**Not converted, because nothing live needs it.** The chosen overnight screen is inked, so it uses the reversed logo we already have; the only variant that wanted a dark one is `logo-plate-inverse-white`, which is parked. Do this when a light-panel variant is actually picked.
 
-	**It is a PNG, so this is now a much smaller job than it used to be** — embed it as a data URI at author time exactly the way `metro-logo.js` already handles the reversed raster, with no SVG re-framing and none of the namespace-stripping the OneBusAway mark needed. The vector positive, `metro-logo-seeklogo.svg`, is 38 Inkscape references deep and only worth cleaning up if a design needs to scale past 1280px; if it is ever used, strip the `inkscape:` and `sodipodi:` attributes along with the outer `<svg>`, because resvg rejects the whole document over an undeclared prefix rather than ignoring it.
+	When it is: strip the outer `<svg>` to re-frame it and **remove the `inkscape:` and `sodipodi:` attributes with it** — resvg rejects the whole document over an undeclared prefix rather than ignoring it, which is the same trap the OneBusAway mark hit. Embed as a data URI at author time, matching `metro-logo.js`, so nothing is reprocessed per render. `king-county-metro-seeklogo.svg` in the same folder is the same logo but 36 Inkscape references deep; prefer the 2008 file.
 
 - [ ] **Shorten long headsigns — nothing overflows any more, so what is left is taste rather than a bug.** Two halves are done: `collapseRepeatedPhrases()` in `src/headsign.js` drops a stuttered phrase, and `destinationSize()` in `src/render/board.js` steps the type down so a long destination cannot reach the time column. `Pioneer Square Chinatown International District Waterfront`, the region's longest, now fits at every density.
 

@@ -20,6 +20,7 @@
 import { OUTCOMES, classifyRequest, tarpit } from './abuse.js';
 import { extractToken } from './routing.js';
 import { recordRequest, tokenFingerprint } from './stats/analytics.js';
+import { recordDeviceTelemetry } from './stats/device-telemetry.js';
 import { handleStats, isStatsRequest } from './stats/handler.js';
 
 /**
@@ -116,13 +117,20 @@ export async function gate( request, env, config ) {
 
 	return {
 		classification,
-		recordOutcome: ( { outcome = classification.outcome, filenameTag = '', upstreamReason = '' } = {} ) =>
+
+		// Both datasets are written from this one closure so they cannot drift: a device row without
+		// its request row, or the reverse, would show up on `/stats` as a device that polled without
+		// being counted. `recordDeviceTelemetry()` no-ops on a request carrying no device headers, so
+		// the setup-logo download — which sends none at all — does not produce an empty device box.
+		recordOutcome: ( { outcome = classification.outcome, filenameTag = '', upstreamReason = '' } = {} ) => {
 			recordRequest( env, {
 				request,
 				classification: { ...classification, outcome },
 				tokenHash,
 				filenameTag,
-				upstreamReason,
-			} ),
+			} );
+
+			recordDeviceTelemetry( env, { request, outcome, filenameTag, upstreamReason } );
+		},
 	};
 }

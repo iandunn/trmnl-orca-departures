@@ -62,8 +62,18 @@ export const MAX_DOUBLES = 20;
  * Fails at import when a schema is over the ceiling.
  *
  * Deliberately a throw rather than a warning: an over-long schema does not degrade, it drops every
- * row, so there is no partial-credit state worth continuing into. `npm test`, `npm run lint` and
- * `wrangler deploy --dry-run` all import these modules, so all three catch it before a deploy does.
+ * row, so there is no partial-credit state worth continuing into.
+ *
+ * **`npm test` is what catches this, and `wrangler deploy --dry-run` is not.** Verified by pushing
+ * the list to 21 on purpose: the dry-run bundles without executing module top-level code and reports
+ * a clean upload, while eight test files fail immediately. That is why `npm run deploy` runs the
+ * suite first — without it the only thing standing between an over-long schema and production is
+ * someone remembering.
+ *
+ * The cost of the throw is worth naming: if one ever did ship, module evaluation fails and **every**
+ * request 500s, so the sign goes dark rather than merely losing analytics. That is the intended
+ * trade — a dead Worker is discovered in minutes and a silently rejected dataset was not discovered
+ * for a day — but it is why the deploy gate above matters rather than being belt and braces.
  *
  * @param {string}   dataset  Named in the message, since three files call this.
  * @param {object[]} blobs
@@ -114,6 +124,23 @@ const MAX_SHORT_BLOB_LENGTH = 64;
  * The eight now live in `./device-telemetry.js`, which is the right home for them anyway — they
  * describe a device rather than a request, and they are empty on the scanner traffic that makes up
  * most rows here.
+ *
+ * ## Six of these are still written and no longer read, deliberately
+ *
+ * When the device panels moved to the telemetry dataset, `imageCached`, `updateSource`, `wakeTime`,
+ * `batteryCapacity` and every double below stopped having a reader in `query.js`, and `route` and
+ * `httpProtocol` never had one. `model` and `firmwareVersion` are the exception and are still read
+ * here — the enrollment breakdown groups on them, because `/api/setup` is recorded as a request and
+ * sends both.
+ *
+ * They keep their slots and keep being written, rather than going empty, for one reason: **they have
+ * history, and a write that stops announces nothing.** A query written six months from now would
+ * silently span a boundary where the column simply becomes blank, which is the same class of
+ * invisible wrongness the append-only rule exists to prevent. The duplication costs a few bytes per
+ * device row and nothing else.
+ *
+ * So this list is intentionally wider than what `query.js` reads. Do not "tidy" it by deleting the
+ * unread ones — that is a reorder, and it reinterprets every historical row.
  */
 export const BLOB_FIELDS = [
 	{ name: 'outcome' },
