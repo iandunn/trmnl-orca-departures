@@ -16,6 +16,7 @@ import { buildMockStatsData, renderStatsHtml } from '../stats/render.js';
 import { runByosChecks } from './byos-check.js';
 import { renderByosCheckHtml } from './byos-page.js';
 import { edgeCaseBoards } from './edge-case-boards.js';
+import { overnightSamples, parkedOvernightSamples } from './overnight-samples.js';
 import { sampleBoards } from './sample-boards.js';
 
 const PREVIEW_PREFIX = '/_preview';
@@ -76,7 +77,7 @@ function requestedTime( url ) {
 	return Number.isFinite( pinned ) && pinned >= EARLIEST_PINNED_MS ? pinned : undefined;
 }
 
-function contactSheet( boards, nowParam ) {
+function contactSheet( boards, nowParam, { heading = '', extraNav = '' } = {} ) {
 	const stamp = Date.now();
 	const carried = nowParam ? `&now=${ encodeURIComponent( nowParam ) }` : '';
 
@@ -106,10 +107,10 @@ function contactSheet( boards, nowParam ) {
 		`:root{--w:940px}` +
 		`img{display:block;width:100%;max-width:var(--w);background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.5)}` +
 		`</style>` +
-		`<h1>1872 &times; 1404 &middot; 4-bit greyscale &middot; shown at 50% &middot; reload to re-render</h1>` +
+		`<h1>${ heading || '1872 &times; 1404 &middot; 4-bit greyscale &middot; shown at 50% &middot; reload to re-render' }</h1>` +
 		`<nav>${ nav }<a href="${ PREVIEW_PREFIX }?now=live">render at the real clock</a>` +
 		`<a href="${ PREVIEW_PREFIX }/byos">BYOS self-check</a>` +
-		`<a href="${ PREVIEW_PREFIX }/stats">stats page (mock data)</a></nav>${ cards }`
+		`<a href="${ PREVIEW_PREFIX }/stats">stats page (mock data)</a>${ extraNav }</nav>${ cards }`
 	);
 }
 
@@ -149,12 +150,34 @@ export async function handlePreview( request, env ) {
 
 	// The reference boards first, then the stress sheet. Both render through the same path the device
 	// gets; the edge cases say on themselves that they are not real stops.
-	const boards = [ ...sampleBoards( at ), ...edgeCaseBoards( at ) ];
+	//
+	// The overnight samples carry finished SVG rather than a board, because they are not boards — they
+	// go through `overnightScreen()`, the same function `/api/display` calls after `ACTIVE_END`, and
+	// `?now=` does not apply to them: every time on that screen comes from config, not from a clock.
+	const boards = [ ...sampleBoards( at ), ...edgeCaseBoards( at ), ...overnightSamples( env ) ];
+
+	// The variants that lost, on their own page. Keeping them off the main sheet is the point: a
+	// contact sheet that mixes what the sign draws with what it was never going to draw stops being a
+	// picture of the sign. They stay renderable because the overnight choice is provisional.
+	const parked = parkedOvernightSamples( env );
+
+	if ( pathname === `${ PREVIEW_PREFIX }/parked` ) {
+		return new Response(
+			contactSheet( parked, url.searchParams.get( 'now' ), {
+				heading: 'Parked designs &middot; considered and not chosen &middot; nothing here ships',
+				extraNav: `<a href="${ PREVIEW_PREFIX }">&larr; back to the sign</a>`,
+			} ),
+			{ headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+		);
+	}
 
 	if ( pathname === PREVIEW_PREFIX || pathname === `${ PREVIEW_PREFIX }/` ) {
-		return new Response( contactSheet( [ ...boards, ...LIVE_SAMPLES ], url.searchParams.get( 'now' ) ), {
-			headers: { 'Content-Type': 'text/html; charset=utf-8' },
-		} );
+		return new Response(
+			contactSheet( [ ...boards, ...LIVE_SAMPLES ], url.searchParams.get( 'now' ), {
+				extraNav: `<a href="${ PREVIEW_PREFIX }/parked">parked designs</a>`,
+			} ),
+			{ headers: { 'Content-Type': 'text/html; charset=utf-8' } }
+		);
 	}
 
 	if ( ! pathname.startsWith( `${ PREVIEW_PREFIX }/` ) ) {
@@ -172,16 +195,26 @@ export async function handlePreview( request, env ) {
 		// `?now=` is deliberately ignored here. These boards are stamped with OneBusAway's own
 		// `currentTime`, and pinning the header to some other instant would make the stamp claim a
 		// freshness the rows do not have — the one thing it exists not to do.
-		const { svg } = await currentScreen( { parsed: live.parsed }, env, Date.now() );
+		//
+		// The window is widened to the whole day for these two, through the same config path the real
+		// thing reads rather than a flag in `currentScreen()`. Without it both samples draw the rest
+		// screen after `ACTIVE_END` — correct for the device, useless here, and identical to each
+		// other, which is exactly how it was found. Evenings are when this gets worked on, and the
+		// rest screen has six samples of its own.
+		const alwaysAwake = { ...env, ACTIVE_START: '00:00', ACTIVE_END: '00:00' };
+		const { svg } = await currentScreen( { parsed: live.parsed }, alwaysAwake, Date.now() );
 
 		return new Response( await rasterize( svg ), { headers } );
 	}
 
-	const sample = boards.find( ( candidate ) => candidate.slug === slug );
+	// Parked slugs resolve here too, or their own page would be a grid of broken images.
+	const sample = [ ...boards, ...parked ].find( ( candidate ) => candidate.slug === slug );
 
 	if ( ! sample ) {
 		return null;
 	}
 
-	return new Response( await renderBoard( sample.board ), { headers } );
+	return new Response( sample.svg ? await rasterize( sample.svg ) : await renderBoard( sample.board ), {
+		headers,
+	} );
 }

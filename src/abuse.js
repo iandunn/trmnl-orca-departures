@@ -179,8 +179,11 @@ export async function classifyRequest( pathname, env ) {
 		};
 	}
 
-	// Authorized, well-formed, and pointed at a real route — which still 404s, because the three BYOS
-	// endpoints are only safe implemented together. See `src/worker.js`.
+	// Authorized, well-formed, and pointed at a real route. The outcome here is a **placeholder**: the
+	// gate cannot know how the request ended — which board state was served, whether OneBusAway
+	// answered — so every BYOS branch overrides it when it calls `recordOutcome()`. A row that still
+	// carries this value in the dataset either predates the endpoints landing on 2026-08-01, or means
+	// a handler returned without recording, which would be a bug.
 	return {
 		outcome: OUTCOMES.byosUnimplemented,
 		tarpit: false,

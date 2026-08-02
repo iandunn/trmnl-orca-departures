@@ -5,7 +5,7 @@
  * expensive rasterisation stays in `index.js`.
  *
  * The layout follows King County Metro's real Connectpoint signs, matched against photographs in
- * `.claude/tmp/cpu-spike/metro official/`. `CLAUDE.md` records what was kept, what was dropped, and
+ * `assets/sources/connectpoint-photos/`. `CLAUDE.md` records what was kept, what was dropped, and
  * the two things we add that Metro does not need — the "Updated at" stamp and the direction bands.
  */
 
@@ -396,16 +396,21 @@ export function buildBoardSvg( board ) {
 	const { mode = 'bus', groups = [] } = board;
 	const { height: rowHeight, scaled } = rowMetrics( groups );
 
-	// Resolved before anything is drawn, because the type size depends on the longest of them.
+	const withDestination = ( row ) => ( {
+		...row,
+		destination: destinationWithRoute( row.badge, row.routeName, collapseRepeatedPhrases( row.to ) ),
+	} );
+
+	// Resolved before anything is drawn, because the type size depends on the longest of them —
+	// tomorrow's rows included, since they sit in the same column and would otherwise be measured
+	// against nothing and overrun the time.
 	const prepared = groups.map( ( group ) => ( {
 		...group,
-		rows: group.rows.map( ( row ) => ( {
-			...row,
-			destination: destinationWithRoute( row.badge, row.routeName, collapseRepeatedPhrases( row.to ) ),
-		} ) ),
+		rows: group.rows.map( withDestination ),
+		tomorrow: ( group.tomorrow ?? [] ).map( withDestination ),
 	} ) );
 	const destinationFontSize = destinationSize(
-		prepared.flatMap( ( group ) => group.rows.map( ( row ) => row.destination ) ),
+		prepared.flatMap( ( group ) => [ ...group.rows, ...group.tomorrow ].map( ( row ) => row.destination ) ),
 		scaled
 	);
 
@@ -434,10 +439,39 @@ export function buildBoardSvg( board ) {
 			// line at the left margin reads as a caption someone forgot to finish, floating in a void
 			// the reader then has to interpret. Centred in the space it explains, it reads as the
 			// deliberate answer to "why is half this sign empty".
-			body += text( PANEL_WIDTH / 2, y + Math.round( span / 2 ) + scaled( 20 ), scaled( 64 ), group.message ?? '', {
+			//
+			// **When tomorrow's first departures are known, they go under it rather than instead of
+			// it.** "Nothing more today" and "here is the first one tomorrow" are two different facts
+			// and a reader late at night wants both — dropping the sentence would leave rows that
+			// look like a normal board, which is the one thing this group must not look like.
+			const tomorrow = group.tomorrow ?? [];
+			const messageY = tomorrow.length
+				? y + scaled( 62 )
+				: y + Math.round( span / 2 ) + scaled( 20 );
+
+			body += text( PANEL_WIDTH / 2, messageY, scaled( tomorrow.length ? 46 : 64 ), group.message ?? '', {
 				weight: 400,
 				fill: GREY,
 				anchor: 'middle',
+			} );
+
+			// They are drawn at the group's own row pitch, starting a row down, so they line up with a
+			// working direction on the other half of the board instead of forming a second grid.
+			tomorrow.slice( 0, ( group.reserved || 1 ) - 1 ).forEach( ( row, rowIndex ) => {
+				const top = y + ( rowIndex + 1 ) * rowHeight;
+
+				body +=
+					badge( LEFT, top + scaled( 26 ), row.badge, mode, scaled ) +
+					text( DESTINATION_LEFT, top + scaled( 94 ), destinationFontSize, row.destination ) +
+					// `Tomorrow` where a scheduled row says `Scheduled`. Same slot, same job: the word
+					// that stops the number below it being read as the next bus.
+					text( RIGHT, top + scaled( 40 ), scaled( 32 ), 'Tomorrow', {
+						weight: 400,
+						fill: GREY,
+						anchor: 'end',
+					} ) +
+					text( RIGHT, top + scaled( 106 ), scaled( 76 ), row.value, { anchor: 'end' } ) +
+					( row.unit ? text( RIGHT, top + scaled( 144 ), scaled( 36 ), row.unit, { anchor: 'end' } ) : '' );
 			} );
 
 			y += span;

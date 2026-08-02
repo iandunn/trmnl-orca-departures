@@ -28,12 +28,13 @@
 
 import { stopLabel } from '../byos/display.js';
 import { dispatchByos } from '../byos/index.js';
-import { renderFailedScreen, upstreamFailedScreen } from '../byos/screens.js';
+import { overnightScreen, renderFailedScreen, upstreamFailedScreen } from '../byos/screens.js';
 import { readConfig } from '../config.js';
 import { FILENAME_TAGS } from '../filename.js';
 import { gate } from '../gate.js';
 import { rasterize } from '../render/index.js';
 import { buildNoticeSvg } from '../render/notice.js';
+import { buildOvernightSvg } from '../render/overnight.js';
 
 /** The firmware's cap on a downloaded image, from `config.h`. */
 const MAX_IMAGE_BYTES = 750000;
@@ -447,6 +448,11 @@ export async function runByosChecks( env, origin ) {
 	} );
 	const upstreamFailedBytes = await rasterize( buildNoticeSvg( upstreamFailed.notice ) );
 
+	// Rendered directly for the same reason as the two above: it is only reachable after `ACTIVE_END`,
+	// so waiting for it means never looking at it during the hours anyone is working on this.
+	const overnight = overnightScreen( { config: readConfig( env ) } );
+	const overnightBytes = await rasterize( buildOvernightSvg( overnight.overnight ) );
+
 	const groups = [
 		{ title: 'Pairing — <code>/api/setup</code>', checks: setup.checks },
 		{ title: 'The poll — <code>/api/display</code>', checks: display.checks },
@@ -473,6 +479,8 @@ export async function runByosChecks( env, origin ) {
 			[ FILENAME_TAGS.upstreamFailed ]:
 				'A valid poll that OneBusAway would not answer. In development that is almost always the shared `TEST` key hitting its rate limit; the log line names the reason.',
 			[ FILENAME_TAGS.renderFailed ]: 'A valid poll that threw on the way to a board.',
+			[ FILENAME_TAGS.overnight ]:
+				'A valid poll, outside the active window. The sign has finished for the day — it did not call OneBusAway at all, and the response tells the device to sleep until the window reopens.',
 		}[ servedTag ] ?? 'A valid poll.';
 
 	const images = [
@@ -495,6 +503,15 @@ export async function runByosChecks( env, origin ) {
 			uri: dataUri( renderFailedBytes ),
 		},
 	];
+
+	if ( servedTag !== FILENAME_TAGS.overnight ) {
+		images.push( {
+			tag: FILENAME_TAGS.overnight,
+			title: 'After hours',
+			note: 'Not a failure — the sign has finished for the day and the buses have not, which is why it says nothing rather than something reassuring. Every time on it comes from `ACTIVE_END` rather than the clock, so the image is identical whenever it is served and its filename never moves.',
+			uri: dataUri( overnightBytes ),
+		} );
+	}
 
 	// Only when the live poll did not already produce it, or the same screen would appear twice with
 	// two different captions.

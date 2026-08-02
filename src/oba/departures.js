@@ -94,6 +94,24 @@ function emptyMessage( result ) {
 	return result?.ok ? 'No more departures today' : 'Departure data unavailable';
 }
 
+/**
+ * The stop code to print when the response that would have carried it never arrived.
+ *
+ * A stop's `code` is what is printed on the pole, and it comes from the references block — so a fetch
+ * that failed has no code, and the band used to fall back to the full OneBusAway id: `Stop 40_621`
+ * rather than `Stop No. 621`. That reads as debug output on the one screen a rider is looking at, and
+ * it appears exactly when the sign is already degraded.
+ *
+ * The agency prefix is the first underscore-delimited field, so the rest is what the agency calls the
+ * stop. **Split on the first underscore only** — the remainder is opaque and routinely contains its
+ * own underscores and hyphens (`40_S_KS_T3`, `40_E15-T1`), and splitting on the last would mangle
+ * them. This is not guaranteed to equal `code`, but it is the same number for every stop checked and
+ * it is what the reader has to work with.
+ */
+function stopCodeFrom( stopId ) {
+	return String( stopId ).replace( /^\d+_/, '' );
+}
+
 /** A stop's own entry in a response's references. Its name, code and compass bearing live here. */
 export function stopReference( result, obaStopId ) {
 	return result?.ok ? indexById( result.references?.stops ).get( obaStopId ) : undefined;
@@ -120,7 +138,7 @@ function groupFor( result, { agency, stopId, directionOverrides, nowMs, limit, k
 	return {
 		heading: directionLabel( stopRef?.direction ?? '', obaStopId, directionOverrides ),
 		name: stopRef?.name ?? '',
-		stop: stopRef?.code ? `Stop No. ${ stopRef.code }` : `Stop ${ obaStopId }`,
+		stop: `Stop No. ${ stopRef?.code || stopCodeFrom( stopId ) }`,
 		rows,
 		...( rows.length === 0 ? { message: emptyMessage( result ) } : {} ),
 	};

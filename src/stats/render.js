@@ -79,10 +79,16 @@ export function escapeHtml( value ) {
  * the real value and quietly label a whole row wrong.
  */
 export const OUTCOME_LABELS = {
-	[ OUTCOMES.unshapedPath ]: 'Unshaped path (scanner)',
-	[ OUTCOMES.badToken ]: 'Wrong token',
-	[ OUTCOMES.badRequest ]: 'Misconfigured URL',
-	[ OUTCOMES.byosUnimplemented ]: 'Device poll, endpoint not built yet',
+	// These three are a sequence — how far through the gate a request got — so they are worded to be
+	// read against each other. Each names the check that rejected it, because "which of these three
+	// is it" is the whole diagnostic value: only the third can be your own device, and only the first
+	// is tarpitted.
+	[ OUTCOMES.unshapedPath ]: 'No /token/ segment in the path (scanner)',
+	[ OUTCOMES.badToken ]: 'Path well-formed, token value wrong',
+	[ OUTCOMES.badRequest ]: 'Token valid, rest of the path malformed',
+	// Retired 2026-08-01 and unreachable now. The label says so rather than describing a state the
+	// sign can still be in, because the rows are real and will keep appearing until they age out.
+	[ OUTCOMES.byosUnimplemented ]: 'Device poll before the endpoints existed (historical)',
 	[ OUTCOMES.favicon ]: 'Favicon',
 	[ OUTCOMES.robots ]: 'robots.txt',
 	[ OUTCOMES.statsAuthFailed ]: 'Stats password rejected',
@@ -321,6 +327,38 @@ function identitySection( identity ) {
 		return `${ networkCount } distinct networks — expected exactly one`;
 	} )();
 
+	const enrollmentDetail = ( { setupCalls, enrollments = [], enrollmentsError = '' } ) => {
+		if ( setupCalls === 0 ) {
+			return '';
+		}
+
+		if ( enrollmentsError ) {
+			return queryFailed( enrollmentsError );
+		}
+
+		// The count and the breakdown come from two different queries, so they can disagree — the
+		// breakdown is capped at 40 groups and the count is not. Saying so beats a table that quietly
+		// adds up to less than the number above it.
+		return (
+			dataTable(
+				[ 'Country', 'Network', 'Model', 'Firmware', 'Calls', 'Last seen' ],
+				enrollments.map( ( row ) => [
+					row.country,
+					row.organization,
+					row.model,
+					row.firmwareVersion,
+					formatCount( row.count ),
+					row.lastSeen,
+				] )
+			) +
+			note(
+				'`/api/setup` is unauthenticated by design — that is how enrolment works — so these rows ' +
+					'are whoever asked, not whoever succeeded. It sends no Access-Token and only four ' +
+					'headers, which is why there is less here than on a poll.'
+			)
+		);
+	};
+
 	const firmwareDetail =
 		identity.firmware.length > 1
 			? dataTable(
@@ -374,6 +412,14 @@ function identitySection( identity ) {
 						'the device, so any call you did not cause means something else enrolled'
 					: 'none',
 			alarm: identity.setupCalls > 0,
+
+			// **The detail is the whole point of the alarm, not a footnote to it.** A count answers
+			// "did this happen" and leaves the only question that matters unanswered: was it me
+			// re-pairing the sign, or something else holding the URL? Network, model and firmware
+			// together settle that — an enrolment from your own home network on the same model you own
+			// is the boring answer, and anything else is not. Putting it here means the owner is not
+			// cross-referencing three other panels while worried.
+			detailHtml: enrollmentDetail( identity ),
 		} ),
 
 		checkRow( {
@@ -541,9 +587,19 @@ function batterySection( battery ) {
 		return number <= ABSENT_NUMBER ? 'no data' : `${ number.toFixed( suffix === 'V' ? 2 : 0 ) } ${ suffix }`;
 	};
 
+	// WiFi signal rides in the same panel because it comes from the same place — one header per poll,
+	// only meaningful as a trend. It is the earliest warning this sign can produce: the device goes
+	// quiet long after its signal starts degrading, so a number sagging over a week is the only lead
+	// time there is. Sitting beside the charge is the point; both are "how is the device holding up".
+	// **Strict inequality against the sentinel, not `< 0`.** RSSI is legitimately negative — a healthy
+	// reading is around -58 dBm — so sign says nothing about whether a value is present, and the
+	// absent marker is exactly -1. Same trap `logReading()` below documents for the device-log copy.
+	const strength = latest ? toNumber( latest.signal ) : ABSENT_NUMBER;
+	const signal = strength < ABSENT_NUMBER ? `, ${ escapeHtml( `${ strength.toFixed( 0 ) } dBm` ) } WiFi` : '';
+
 	const summary = latest
 		? `<p class="metric"><strong>${ escapeHtml( reading( latest.percent, '%' ) ) }</strong>` +
-			`<span>latest charge, ${ escapeHtml( reading( latest.voltage, 'V' ) ) }, ` +
+			`<span>latest charge, ${ escapeHtml( reading( latest.voltage, 'V' ) ) }${ signal }, ` +
 			`as of ${ escapeHtml( latest.bucket ) }</span></p>`
 		: '<p class="none">no authenticated wakes yet, so the device has reported no battery readings</p>';
 
@@ -617,6 +673,205 @@ function renderOutcomesSection( renderOutcomes ) {
 			'degraded screen.',
 		error: renderOutcomes.error,
 		bodyHtml: barList( rows ),
+	} );
+}
+
+/**
+ * RSSI as the number of bars a phone would draw.
+ *
+ * The thresholds are the conventional WiFi ones — roughly -55 / -67 / -75 / -85 dBm — chosen because
+ * a reader already knows how to read them, not because the firmware defines any. `-1` is the absent
+ * sentinel rather than an extremely strong signal, so it has to be excluded before comparing: every
+ * real reading is more negative than it.
+ */
+export function signalBars( rssi ) {
+	const value = toNumber( rssi );
+
+	if ( value >= ABSENT_NUMBER ) {
+		return 0;
+	}
+
+	if ( value >= -55 ) {
+		return 4;
+	}
+
+	if ( value >= -67 ) {
+		return 3;
+	}
+
+	if ( value >= -75 ) {
+		return 2;
+	}
+
+	return 1;
+}
+
+/**
+ * The bars themselves.
+ *
+ * Inline SVG, like every other chart here — the page loads no external asset, so an icon font or a
+ * sprite is not available even in principle. Unfilled bars stay drawn in outline rather than being
+ * omitted, so "one bar of four" is legible as weak rather than as a rendering that half-failed.
+ */
+function signalIcon( rssi ) {
+	const bars = signalBars( rssi );
+	const label = bars === 0 ? 'no signal reading' : `${ bars } of 4 bars`;
+
+	const shapes = [ 0, 1, 2, 3 ]
+		.map( ( index ) => {
+			const height = 6 + index * 5;
+			const filled = index < bars;
+
+			return (
+				`<rect x="${ index * 7 }" y="${ 22 - height }" width="5" height="${ height }" rx="1" ` +
+				`fill="${ filled ? COLOR_SERVED : 'none' }" stroke="${ filled ? 'none' : '#4a4a4a' }" ` +
+				'stroke-width="1"></rect>'
+			);
+		} )
+		.join( '' );
+
+	return (
+		`<svg class="signal" viewBox="0 0 26 24" width="26" height="24" role="img" ` +
+		`aria-label="${ escapeHtml( label ) }"><title>${ escapeHtml( label ) }</title>${ shapes }</svg>`
+	);
+}
+
+/**
+ * One panel per physical device, keyed on the MAC address from the `ID` header.
+ *
+ * **This is the only place two devices are ever separated.** Every other panel aggregates across
+ * whatever authenticated, which is what made a second device look like "two firmware versions" or
+ * "double the expected polls" rather than like a second device. Those alarms still matter — they fire
+ * on inference and catch a device that has not polled recently — but this box answers the follow-up.
+ *
+ * Grouped from the most recent authenticated polls, so each box is that device's *current* state
+ * rather than an average over the window.
+ */
+function devicesSection( devices ) {
+	if ( devices.error ) {
+		return panel( { title: 'Devices', error: devices.error, bodyHtml: '' } );
+	}
+
+	if ( devices.rows.length === 0 ) {
+		return panel( {
+			title: 'Devices',
+			tooltip: 'One box per physical device, from the MAC address the firmware sends as `ID`.',
+			bodyHtml: '<p class="none">no authenticated polls yet, so no device has identified itself</p>',
+		} );
+	}
+
+	return devices.rows.map( deviceBox ).join( '' );
+}
+
+/** A `-1` numeric reading as words, so an absent sensor never renders as a plausible value. */
+function deviceReading( value, format ) {
+	const number = toNumber( value );
+
+	return number === ABSENT_NUMBER ? 'no data' : format( number );
+}
+
+/**
+ * `Battery-Charging` and `USB-Connected` arrive as free text, and the firmware's exact spelling is
+ * unverified — so this reports what was sent rather than interpreting it into a yes or a no it might
+ * have wrong.
+ */
+function deviceFlag( value ) {
+	return String( value ?? '' ).trim() === '' ? 'not reported' : value;
+}
+
+function deviceBox( device ) {
+	const rssi = toNumber( device.signal );
+
+	const facts = [
+		[ 'MAC address', device.deviceId || 'not sent' ],
+		[ 'IP address', device.clientIp || 'unknown' ],
+		[ 'Network', `${ device.organization || 'unknown' } (${ device.country || '??' })` ],
+		[
+			'WiFi signal',
+			`${ signalIcon( device.signal ) } ${ escapeHtml(
+				deviceReading( rssi, ( value ) => `${ value.toFixed( 0 ) } dBm` )
+			) }${ device.wifiBand ? escapeHtml( ` on ${ device.wifiBand }` ) : '' }`,
+			true,
+		],
+		[ 'Model', device.model || 'not sent' ],
+		[
+			'Panel',
+			`${ deviceReading( device.width, ( value ) => value.toFixed( 0 ) ) } x ${ deviceReading(
+				device.height,
+				( value ) => value.toFixed( 0 )
+			) }`,
+		],
+		[ 'Firmware', `${ device.firmwareVersion || 'unknown' }${ device.firmwareCommit ? ` (${ device.firmwareCommit })` : '' }` ],
+		[
+			'Battery',
+			`${ deviceReading( device.percent, ( value ) => `${ value.toFixed( 0 ) }%` ) }, ` +
+				`${ deviceReading( device.voltage, ( value ) => `${ value.toFixed( 2 ) } V` ) }, ` +
+				`${ deviceReading( device.batteryTemperature, ( value ) => `${ value.toFixed( 0 ) } C` ) }`,
+		],
+		[ 'Battery capacity', device.batteryCapacity || 'not reported' ],
+		[ 'Charging', deviceFlag( device.batteryCharging ) ],
+		[ 'USB connected', deviceFlag( device.usbConnected ) ],
+		[ 'Last seen', device.lastSeen || 'unknown' ],
+		[ 'Last request', labelFor( OUTCOME_LABELS, device.outcome ) || device.outcome || 'unknown' ],
+		[
+			'Last screen served',
+			device.filenameTag
+				? labelFor( FILENAME_TAG_LABELS, device.filenameTag )
+				: 'none — that request served no image',
+		],
+		[ 'Upstream on that poll', device.upstreamReason || 'every stop answered' ],
+		[ 'Woke because', device.updateSource || 'not reported' ],
+		[ 'Awake last cycle', device.wakeTime ? `${ device.wakeTime } ms` : 'not reported' ],
+		[ 'Image cached', deviceFlag( device.imageCached ) ],
+		[
+			'Refresh rate it echoed',
+			deviceReading( device.refreshRate, ( value ) => `${ value.toFixed( 0 ) } s` ),
+		],
+	];
+
+	// `raw` marks the one row whose value is already markup — the signal icon. Everything else is
+	// escaped here, which is the rule this file exists to keep: a device sends its own model string
+	// and firmware version, and both land in the owner's browser.
+	const rows = facts
+		.map( ( [ label, value, raw ] ) =>
+			`<div class="fact"><dt>${ escapeHtml( label ) }</dt><dd>${ raw ? value : escapeHtml( value ) }</dd></div>`
+		)
+		.join( '' );
+
+	return panel( {
+		title: `Device ${ device.deviceId || '(no ID header)' }`,
+		tooltip: 'Everything this device reported on its most recent authenticated poll.',
+		bodyHtml: `<dl class="facts">${ rows }</dl>`,
+	} );
+}
+
+/**
+ * Why OneBusAway did not answer, on the polls where it did not.
+ *
+ * **The panel next to it says a poll ended in `obafail`; this one says why**, and the difference is
+ * the whole diagnosis. `http-429` means the API key is rate-limited, which has a known fix — swap the
+ * shared `TEST` key for a real one — while `timeout` means the upstream is slow, which does not.
+ * Those were indistinguishable on this page until 2026-08-01.
+ *
+ * Empty is the healthy state and says so, rather than rendering a bare "none" that reads as a
+ * missing query.
+ */
+function upstreamReasonsSection( upstreamReasons ) {
+	const total = upstreamReasons.rows.reduce( ( sum, row ) => sum + row.count, 0 );
+
+	const rows = upstreamReasons.rows.map( ( row ) =>
+		barRow( { label: row.upstreamReason, count: row.count, total, tone: 'rejected' } )
+	);
+
+	return panel( {
+		title: 'Upstream failures',
+		tooltip:
+			'Why OneBusAway did not answer. Counts polls where at least one stop failed, including ' +
+			'partial failures that still drew a board. `http-429` is the shared TEST key being rate-limited.',
+		error: upstreamReasons.error,
+		bodyHtml: rows.length
+			? barList( rows )
+			: '<p class="none">every stop answered on every poll in this window</p>',
 	} );
 }
 
@@ -872,6 +1127,10 @@ const STYLES =
 	'.bar-fill{display:block;height:100%}' +
 	'.bar-count{font-variant-numeric:tabular-nums;color:var(--muted)}' +
 	'.checks{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}' +
+	'.facts{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 24px}' +
+	'.fact dt{font-size:12px;color:#8a8a8a;margin:0 0 2px}' +
+	'.fact dd{margin:0;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:8px}' +
+	'.signal{flex:none;vertical-align:middle}' +
 	'.check{display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:5px;' +
 	'border:1px solid var(--line)}' +
 	'.check-body{display:flex;flex-direction:column;gap:2px;min-width:0}' +
@@ -915,11 +1174,13 @@ export function renderStatsHtml( data ) {
 		( data.errorMessage ? `<p class="banner error">${ escapeHtml( `query failed: ${ data.errorMessage }` ) }</p>` : '' ) +
 		( showEmptyBanner ? emptyBanner( data.rangeLabel ) : '' ) +
 		identitySection( data.identity ) +
+		devicesSection( data.devices ) +
 		totalsSection( data.totals ) +
 		outcomesSection( data.outcomes ) +
 		panelHealthSection( data.panel ) +
 		batterySection( data.battery ) +
 		renderOutcomesSection( data.renderOutcomes ) +
+		upstreamReasonsSection( data.upstreamReasons ) +
 		deviceLogsSection( data.deviceLogs ) +
 		badRequestsSection( data.badRequests ) +
 		rejectionsSection( data.rejections ) +
@@ -1012,6 +1273,11 @@ export function buildMockStatsData( rangeKey ) {
 			],
 			firmwareError: '',
 			setupCalls: 3,
+			enrollments: [
+				{ country: 'US', organization: 'Comcast Cable', model: 'x', firmwareVersion: '1.7.2', count: 2, lastSeen: '2026-07-30 09:14:02' },
+				{ country: 'DE', organization: 'Hetzner Online', model: '', firmwareVersion: '', count: 1, lastSeen: '2026-07-29 03:51:44' },
+			],
+			enrollmentsError: '',
 			authorizedRequests: 19102,
 			expectedRequests: 8064,
 		},
@@ -1032,12 +1298,54 @@ export function buildMockStatsData( rangeKey ) {
 
 		battery: {
 			series: [
-				{ bucket: '2026-07-28 00:00:00', voltage: 4.02, percent: 92 },
-				{ bucket: '2026-07-28 06:00:00', voltage: 3.98, percent: 88 },
-				{ bucket: '2026-07-28 12:00:00', voltage: ABSENT_NUMBER, percent: ABSENT_NUMBER },
-				{ bucket: '2026-07-28 18:00:00', voltage: 3.91, percent: 81 },
-				{ bucket: '2026-07-29 00:00:00', voltage: 3.86, percent: 74 },
-				{ bucket: '2026-07-29 06:00:00', voltage: 3.82, percent: 69 },
+				{ bucket: '2026-07-28 00:00:00', voltage: 4.02, percent: 92, signal: -54 },
+				{ bucket: '2026-07-28 06:00:00', voltage: 3.98, percent: 88, signal: -57 },
+				{ bucket: '2026-07-28 12:00:00', voltage: ABSENT_NUMBER, percent: ABSENT_NUMBER, signal: ABSENT_NUMBER },
+				{ bucket: '2026-07-28 18:00:00', voltage: 3.91, percent: 81, signal: -61 },
+				{ bucket: '2026-07-29 00:00:00', voltage: 3.86, percent: 74, signal: -66 },
+				{ bucket: '2026-07-29 06:00:00', voltage: 3.82, percent: 69, signal: -68 },
+			],
+			error: '',
+		},
+
+		devices: {
+			rows: [
+				{
+					deviceId: 'A4:CF:12:9B:7E:03',
+					lastSeen: '2026-07-31 22:04:11',
+					model: 'x',
+					firmwareVersion: '1.7.2',
+					firmwareCommit: 'e91b4c7',
+					clientIp: '73.42.118.9',
+					organization: 'Comcast Cable',
+					country: 'US',
+					wifiBand: '2.4 GHz',
+					batteryCharging: 'false',
+					usbConnected: 'false',
+					batteryCapacity: '5210/6000',
+					imageCached: '1',
+					updateSource: 'timer',
+					wakeTime: '4180',
+					outcome: 'byos-display',
+					filenameTag: 'departs',
+					upstreamReason: '',
+					signal: -61,
+					voltage: 3.82,
+					percent: 69,
+					batteryTemperature: 24,
+					refreshRate: 60,
+					width: 1872,
+					height: 1404,
+				},
+			],
+			error: '',
+		},
+
+		upstreamReasons: {
+			rows: [
+				{ upstreamReason: 'http-429', count: 361, lastSeen: '2026-07-31 14:31:55' },
+				{ upstreamReason: 'timeout', count: 34, lastSeen: '2026-07-30 08:12:40' },
+				{ upstreamReason: 'malformed', count: 7, lastSeen: '2026-07-29 17:55:02' },
 			],
 			error: '',
 		},

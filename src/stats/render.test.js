@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { OUTCOME_LABELS, buildMockStatsData, escapeHtml, renderStatsHtml } from './render.js';
+import { OUTCOME_LABELS, buildMockStatsData, escapeHtml, renderStatsHtml, signalBars } from './render.js';
 import { OUTCOMES } from '../abuse.js';
 
 /** The payload the page has to survive, in the fields an attacker actually controls. */
@@ -30,6 +30,8 @@ function emptyData() {
 		panel: { imageCached: [], imageCachedError: '', refreshEcho: [], refreshEchoError: '' },
 		battery: { series: [], error: '' },
 		renderOutcomes: { rows: [], error: '' },
+		upstreamReasons: { rows: [], error: '' },
+		devices: { rows: [], error: '' },
 		badRequests: { rows: [], error: '' },
 		rejections: { sources: [], sourcesError: '', probePaths: [], probePathsError: '' },
 		recent: { rows: [], error: '' },
@@ -441,5 +443,35 @@ describe( 'buildMockStatsData', () => {
 		const stops = buildMockStatsData( '7d' ).badRequests.rows.map( ( row ) => row.stopIds );
 
 		expect( stops ).toEqual( [ '590,43O', '621,623,1121' ] );
+	} );
+} );
+
+describe( 'signalBars', () => {
+	// The trap this exists for: RSSI is legitimately negative, so a naive "is it below zero" check
+	// cannot tell a real reading from the -1 the schema writes for an absent header. -1 must read as
+	// no bars, not as the strongest possible signal.
+	it( 'treats the absent sentinel as no reading rather than a strong one', () => {
+		expect( signalBars( -1 ) ).toBe( 0 );
+		expect( signalBars( 0 ) ).toBe( 0 );
+		expect( signalBars( '' ) ).toBe( 0 );
+		expect( signalBars( undefined ) ).toBe( 0 );
+	} );
+
+	it.each( [
+		[ -40, 4 ],
+		[ -55, 4 ],
+		[ -56, 3 ],
+		[ -67, 3 ],
+		[ -68, 2 ],
+		[ -75, 2 ],
+		[ -76, 1 ],
+		[ -95, 1 ],
+	] )( 'draws %i dBm as %i bars', ( rssi, bars ) => {
+		expect( signalBars( rssi ) ).toBe( bars );
+	} );
+
+	// Analytics Engine hands doubles back as strings often enough that every other reader coerces.
+	it( 'accepts the strings the SQL API actually returns', () => {
+		expect( signalBars( '-61' ) ).toBe( 3 );
 	} );
 } );

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from './worker.js';
 import busNorth from './oba/fixtures/1_600.json';
 import { clearMemo } from './oba/memo.js';
@@ -143,6 +143,18 @@ describe( '/api/display', () => {
 	} );
 
 	describe( 'the filename it issues', () => {
+		// Pinned inside the active window, because every tag below is a *departures* tag and the sign
+		// does not draw departures at night. Without this the suite passes all day and fails after
+		// `ACTIVE_END` — a test that depends on when it is run is worse than no test.
+		beforeEach( () => {
+			vi.useFakeTimers();
+			vi.setSystemTime( Date.parse( '2026-08-01T12:00:00-07:00' ) );
+		} );
+
+		afterEach( () => {
+			vi.useRealTimers();
+		} );
+
 		it( 'satisfies all three firmware shape rules', async () => {
 			const { filename } = await displayBody();
 

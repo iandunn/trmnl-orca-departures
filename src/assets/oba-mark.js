@@ -8,7 +8,7 @@
  * while windows end dark — a naive black->white then white->dark pair flattens both to one colour
  * and the windows dissolve into the body.
  *
- * Source: OneBusAway_Logo_Vehicles_Only.svg (see .claude/tmp/cpu-spike/oba icons/).
+ * Source: OneBusAway_Logo_Vehicles_Only.svg (see assets/sources/oba-mark/).
  */
 
 /** All three vehicles, light-on-dark. Bounds within the source page. */

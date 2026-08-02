@@ -46,7 +46,7 @@ It removes any CPU question entirely, since we stop rendering. It costs four thi
 
 - **`filename`.** The content-hash cache key is the only flicker defense on the X, and the mechanism every error screen depends on. A hosted plugin cannot reach it.
 
-- **`refresh_rate` scheduling.** Commute windows and the overnight sleep go with it. That is the entire battery budget.
+- **`refresh_rate` scheduling.** The active window and the overnight sleep go with it. That is the entire battery budget.
 
 - **Distinct-filename error screens.** Without them a degraded state is silently suppressed by the device's own cache — the panel keeps showing stale departures while the server serves perfectly correct JSON.
 
@@ -66,7 +66,7 @@ The real cost is different and worse. It is a box to maintain, and a sign that g
 
 - **The half of the `404.html` trick that does the work is client-side JavaScript**, reacting to `location.pathname`. The device is not a browser and has no JS engine. It performs one HTTP GET and parses the bytes.
 
-- **The response is byte-identical for every request**, since a static host serves a static file. A fixed `refresh_rate` is survivable — it costs the commute windows and the overnight sleep. A fixed `filename` is not: the device caches on it and skips the repaint, so the panel freezes permanently while the server keeps answering correctly. The board has to be computed per request from live predictions and the current time, and that is the one thing a static host cannot do by definition.
+- **The response is byte-identical for every request**, since a static host serves a static file. A fixed `refresh_rate` is survivable — it costs the overnight sleep, which is the whole battery budget. A fixed `filename` is not: the device caches on it and skips the repaint, so the panel freezes permanently while the server keeps answering correctly. The board has to be computed per request from live predictions and the current time, and that is the one thing a static host cannot do by definition.
 
 The way out is to regenerate on a schedule so the content hash moves, which is the hybrid worth naming: the Worker serves the JSON and Pages hosts the PNG bytes. Structurally possible, since cross-host images need no auth, only public fetchability. Two things kill that too. GitHub Actions cron has a **5-minute floor** and habitually slips 10–30 minutes, which makes the countdown row actively wrong, and that row is the signature element of the design. And unlimited Actions minutes require a **public repo**, which publishes the stop ID — roughly, where the sign's owner lives.
 

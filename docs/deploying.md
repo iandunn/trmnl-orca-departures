@@ -69,6 +69,8 @@ A read-only deploy token fails with `Authentication error [code: 10000]`. Wrangl
 
 Once it is deployed, `npm run tail` streams the Worker's logs live, including the diagnostics the device POSTs to `/api/log`. That is the only channel back from a sign that is rendering nothing, so it is the first place to look. See [development.md](development.md#reading-the-devices-logs).
 
+To confirm the deployment answers correctly before you pair anything to it, [manual-testing.md](manual-testing.md) walks the four requests the device makes as `curl` commands, with what each response has to contain.
+
 ## 4. Point your TRMNL at it
 
 The device's WiFi captive portal is the only way to set the server URL — there is no dashboard setting and no build flag. Enter:

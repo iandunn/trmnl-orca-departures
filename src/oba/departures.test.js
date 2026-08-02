@@ -131,7 +131,10 @@ describe( 'a stop with no usable data', () => {
 
 		expect( south.rows ).toHaveLength( 0 );
 		expect( south.message ).toBe( 'Departure data unavailable' );
-		expect( south.stop ).toBe( 'Stop 1_430' );
+		// The code comes from the references block, so a failed fetch has none — but the band still
+		// says `Stop No. 430` rather than the full OneBusAway id, which reads as debug output on the
+		// one screen a rider is looking at, at exactly the moment the sign is already degraded.
+		expect( south.stop ).toBe( 'Stop No. 430' );
 	} );
 
 	// Which platform a band belongs to is a fact about the pole, not about this fetch. On a two-stop

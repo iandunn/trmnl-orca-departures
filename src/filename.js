@@ -75,6 +75,9 @@ export const FILENAME_TAGS = {
 	upstreamFailed: 'obafail',
 	renderFailed: 'rnderrs',
 	badPath: 'badpath',
+	// The nightly rest screen. Not a failure — the sign has finished for the day and the buses have
+	// not — but it still needs its own tag, so the cache can never confuse it with a board.
+	overnight: 'layover',
 };
 
 const TAG_PATTERN = /^[a-z0-9]{7}$/;

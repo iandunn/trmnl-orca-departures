@@ -127,9 +127,9 @@ export async function dispatchByos( request, env, classification, recordOutcome 
 		return handleLog( request, parsed, env );
 	}
 
-	const { response, tag } = await handleDisplay( request, target, env );
+	const { response, tag, upstreamReason } = await handleDisplay( request, target, env );
 
-	recordOutcome( { outcome: outcomeFor( OUTCOMES.byosDisplay ), filenameTag: tag } );
+	recordOutcome( { outcome: outcomeFor( OUTCOMES.byosDisplay ), filenameTag: tag, upstreamReason } );
 
 	return response;
 }

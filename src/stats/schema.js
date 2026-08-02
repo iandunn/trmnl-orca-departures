@@ -83,6 +83,49 @@ export const BLOB_FIELDS = [
 	 * that states the fact outright cannot drift.
 	 */
 	{ name: 'authorized' },
+
+	/**
+	 * Why OneBusAway did not answer, on a poll where it did not.
+	 *
+	 * `filenameTag` already says a poll ended in `obafail`, which is *that* it failed and never *why*
+	 * — and the difference is the whole diagnosis. A `429` means the API key is rate-limited, which is
+	 * a key problem with a known fix; a `timeout` means the upstream is slow, which is not. Those
+	 * looked identical on this page until 2026-08-01, and the shared `TEST` key 429s constantly, so
+	 * the common case was the one being hidden.
+	 *
+	 * Carries an HTTP status when there is one (`http-429`), the reason slug otherwise. Empty on a
+	 * poll where every stop answered, and on every request that is not a poll.
+	 *
+	 * **Partial failures are recorded too.** One stop answering is enough for a board, so those never
+	 * reach `obafail` and would otherwise be invisible — which is exactly the shape a quota problem
+	 * takes as it starts.
+	 */
+	{ name: 'upstreamReason' },
+
+	/**
+	 * The device's own identity and the rest of its telemetry, appended 2026-08-02 for the per-device
+	 * panels on `/stats`.
+	 *
+	 * **`deviceId` is the MAC address, from the `ID` header, and it is the only stable per-device key
+	 * there is.** Everything else the firmware sends describes a *kind* of device — model, geometry,
+	 * firmware build — so two identical signs were previously indistinguishable in this dataset. That
+	 * is exactly the case the device-identity alarms exist to catch, and they were inferring it from
+	 * network and firmware counts because there was nothing better to group on.
+	 *
+	 * There is no serial number. The firmware sends none, so the MAC is what stands in for one.
+	 *
+	 * `clientIp` is recorded by the same decision that records stop IDs raw: on a single-device sign
+	 * the address is a constant, and a constant is what makes a deviation legible. Cloudflare's own
+	 * request logs hold it regardless. It does mean a screenshot of `/stats` now carries an IP as well
+	 * as roughly a home address — the page already says so about the stop.
+	 */
+	{ name: 'deviceId' },
+	{ name: 'clientIp' },
+	{ name: 'wifiBand' },
+	{ name: 'firmwareCommit' },
+	{ name: 'batteryCharging' },
+	{ name: 'usbConnected' },
+	{ name: 'temperatureProfile' },
 ];
 
 /**
@@ -265,6 +308,15 @@ const TEXT_HEADERS = {
 	'Update-Source': 'updateSource',
 	'Wake-Time': 'wakeTime',
 	'Battery-Capacity': 'batteryCapacity',
+
+	// `ID` is the MAC address. Undocumented in the reference field list and read straight out of
+	// `buildDisplayHeaders()` in the firmware, along with the four below it.
+	ID: 'deviceId',
+	'WiFi-Band': 'wifiBand',
+	'FW-Commit': 'firmwareCommit',
+	'Battery-Charging': 'batteryCharging',
+	'USB-Connected': 'usbConnected',
+	'Temperature-Profile': 'temperatureProfile',
 };
 
 /**
@@ -290,7 +342,13 @@ function pathOf( request ) {
 	}
 }
 
-export function eventFromRequest( { request, classification, tokenHash = '', filenameTag = '' } ) {
+export function eventFromRequest( {
+	request,
+	classification,
+	tokenHash = '',
+	filenameTag = '',
+	upstreamReason = '',
+} ) {
 	const headers = request?.headers;
 	const cf = request?.cf ?? {};
 	const parsed = classification?.parsed;
@@ -303,6 +361,7 @@ export function eventFromRequest( { request, classification, tokenHash = '', fil
 		stopIds: parsed?.stopIds?.join( ',' ),
 		tokenHash,
 		filenameTag,
+		upstreamReason,
 
 		// Recorded only when the caller did not authenticate. An authenticated path carries the live
 		// shared secret in a segment, so it must never be written down even in filtered form.
@@ -313,6 +372,10 @@ export function eventFromRequest( { request, classification, tokenHash = '', fil
 		networkOrganization: cf.asOrganization,
 		httpProtocol: cf.httpProtocol,
 		userAgent: headers?.get( 'User-Agent' ),
+
+		// Cloudflare's own header, not the device's — the firmware has no idea what its public address
+		// is. Recorded for the same reason as the network columns beside it.
+		clientIp: headers?.get( 'CF-Connecting-IP' ),
 	};
 
 	for ( const [ header, name ] of Object.entries( TEXT_HEADERS ) ) {

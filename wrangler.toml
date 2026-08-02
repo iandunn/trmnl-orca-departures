@@ -29,15 +29,23 @@ enabled = true
 # IANA timezone. Everything the sign displays or schedules is computed in local time.
 TIMEZONE = "America/Los_Angeles"
 
-# The active window, local time, 24h. Outside it the sign sleeps until the next start — computed
-# fresh each evening rather than assumed, because the device wakes to poll rather than on a clock.
-ACTIVE_START = "06:00"
-ACTIVE_END = "22:00"
+# The active window, local time, 24h. Outside it the sign draws its rest screen and sleeps until the
+# next start — one wake, not a slower cadence, and it does not call OneBusAway at all in between.
+#
+# The sleep is computed fresh each evening rather than assumed, because the device wakes to poll
+# rather than on a wall clock, and because a night is 23 or 25 hours twice a year. See
+# `src/schedule.js` for what daylight saving does to the naive version of that arithmetic.
+ACTIVE_START = "06:30"
+ACTIVE_END = "21:30"
 
-# Seconds between polls. `refresh_rate` is unclamped by the firmware, so the overnight value is
-# just a large number. Absent or 0 hot-loops the device and flattens the battery — never omit it.
+# Seconds between polls while the sign is awake. `refresh_rate` is unclamped by the firmware, so the
+# overnight sleep is just a large number computed from the window above rather than a setting.
+# Absent or 0 hot-loops the device and flattens the battery — never omit it.
+#
+# There is deliberately no idle rate. Overnight is a single sleep, so a third tier between "awake"
+# and "asleep" would have nothing to describe; a fork that wants slower daytime polling changes this
+# number rather than adding one.
 REFRESH_ACTIVE_SECONDS = 60
-REFRESH_IDLE_SECONDS = 900
 
 # The regional OneBusAway deployment. Only Puget Sound has been tested.
 OBA_BASE_URL = "https://api.pugetsound.onebusaway.org/api/where"

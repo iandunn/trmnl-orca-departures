@@ -116,12 +116,13 @@ export async function gate( request, env, config ) {
 
 	return {
 		classification,
-		recordOutcome: ( { outcome = classification.outcome, filenameTag = '' } = {} ) =>
+		recordOutcome: ( { outcome = classification.outcome, filenameTag = '', upstreamReason = '' } = {} ) =>
 			recordRequest( env, {
 				request,
 				classification: { ...classification, outcome },
 				tokenHash,
 				filenameTag,
+				upstreamReason,
 			} ),
 	};
 }

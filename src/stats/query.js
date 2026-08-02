@@ -16,6 +16,7 @@
  * is where a broken query is most likely to live.
  */
 
+import { OUTCOMES } from '../abuse.js';
 import { blobColumn, doubleColumn, ABSENT_NUMBER } from './schema.js';
 import { logBlobColumn, logDoubleColumn } from './device-logs.js';
 
@@ -120,10 +121,10 @@ function rowsToGroups( rows, names ) {
  */
 export function expectedRequests( config, days ) {
 	const activeMinutes = Math.max( 0, config.activeEndMinutes - config.activeStartMinutes );
-	const idleMinutes = Math.max( 0, 1440 - activeMinutes );
 
-	const perDay =
-		( activeMinutes * 60 ) / config.refreshActiveSeconds + ( idleMinutes * 60 ) / config.refreshIdleSeconds;
+	// One wake for the whole night rather than a slower cadence, since the sign now sleeps until the
+	// window reopens. That single poll is the `+ 1`.
+	const perDay = ( activeMinutes * 60 ) / config.refreshActiveSeconds + 1;
 
 	return Math.round( perDay * days );
 }
@@ -163,6 +164,9 @@ export async function buildStatsData( env, config, rangeKey ) {
 		refreshEcho,
 		battery,
 		renderOutcomes,
+		deviceRows,
+		enrollments,
+		upstreamReasons,
 		badRequests,
 		rejectionSources,
 		probePaths,
@@ -203,7 +207,12 @@ export async function buildStatsData( env, config, rangeKey ) {
 			SELECT
 				toStartOfInterval(timestamp, INTERVAL '6' HOUR) AS bucket,
 				AVG(${ doubleColumn( 'batteryVoltage' ) }) AS voltage,
-				AVG(${ doubleColumn( 'percentCharged' ) }) AS percent
+				AVG(${ doubleColumn( 'percentCharged' ) }) AS percent,
+				-- WiFi signal shares the battery's bucketing because it is read the same way: one value
+				-- per poll, from a header, meaningful only as a trend. A falling RSSI is the earliest
+				-- warning this sign can produce — the device goes quiet long after the signal starts
+				-- degrading, so a line that sags for a week is the only lead time there is.
+				AVG(${ doubleColumn( 'signalStrength' ) }) AS signal
 			FROM ${ dataset }
 			WHERE timestamp > NOW() - INTERVAL '${ days }' DAY
 				AND ${ authorizedOnly }
@@ -214,6 +223,77 @@ export async function buildStatsData( env, config, rangeKey ) {
 		` ),
 
 		run( groupQuery( { dataset, columns: [ blobColumn( 'filenameTag' ) ], where: authorizedOnly, days } ) ),
+
+		// The most recent authenticated polls, with every device column on them.
+		//
+		// **Raw rows rather than a `GROUP BY`, because "latest" is the question.** Grouping would need
+		// `argMax` per column, which this SQL surface may or may not support, and the aggregate a
+		// `GROUP BY` can give — an average battery voltage — is not what a device panel is asking for.
+		// Fifty rows is enough to cover several devices' last poll each, and the per-device snapshot is
+		// assembled in JS below.
+		run( `
+			SELECT
+				timestamp,
+				${ blobColumn( 'deviceId' ) } AS device_id,
+				${ blobColumn( 'model' ) } AS model,
+				${ blobColumn( 'firmwareVersion' ) } AS firmware_version,
+				${ blobColumn( 'firmwareCommit' ) } AS firmware_commit,
+				${ blobColumn( 'clientIp' ) } AS client_ip,
+				${ blobColumn( 'networkOrganization' ) } AS organization,
+				${ blobColumn( 'country' ) } AS country,
+				${ blobColumn( 'wifiBand' ) } AS wifi_band,
+				${ blobColumn( 'batteryCharging' ) } AS battery_charging,
+				${ blobColumn( 'usbConnected' ) } AS usb_connected,
+				${ blobColumn( 'batteryCapacity' ) } AS battery_capacity,
+				${ blobColumn( 'imageCached' ) } AS image_cached,
+				${ blobColumn( 'updateSource' ) } AS update_source,
+				${ blobColumn( 'wakeTime' ) } AS wake_time,
+				${ blobColumn( 'outcome' ) } AS outcome,
+				${ blobColumn( 'filenameTag' ) } AS filename_tag,
+				${ blobColumn( 'upstreamReason' ) } AS upstream_reason,
+				${ doubleColumn( 'signalStrength' ) } AS signal,
+				${ doubleColumn( 'batteryVoltage' ) } AS voltage,
+				${ doubleColumn( 'percentCharged' ) } AS percent,
+				${ doubleColumn( 'batteryTemperature' ) } AS battery_temp,
+				${ doubleColumn( 'refreshRateEcho' ) } AS refresh_rate,
+				${ doubleColumn( 'width' ) } AS width,
+				${ doubleColumn( 'height' ) } AS height
+			FROM ${ dataset }
+			WHERE timestamp > NOW() - INTERVAL '${ days }' DAY AND ${ authorizedOnly }
+			ORDER BY timestamp DESC
+			LIMIT 50
+		` ),
+
+		// Who enrolled, for the alarm that says something did. A bare count answers "did this happen"
+		// and nothing else — and the follow-up question is always the same one: was that me re-pairing
+		// the sign, or was it something else holding the URL? Network, model and firmware together are
+		// what distinguish those two, so the alarm carries them rather than making the owner go and
+		// cross-reference another panel while worried.
+		run(
+			groupQuery( {
+				dataset,
+				columns: [
+					blobColumn( 'country' ),
+					blobColumn( 'networkOrganization' ),
+					blobColumn( 'model' ),
+					blobColumn( 'firmwareVersion' ),
+				],
+				where: `${ blobColumn( 'outcome' ) } = '${ OUTCOMES.byosSetup }'`,
+				days,
+			} )
+		),
+
+		// Why OneBusAway did not answer, on the polls where it did not. Filtered to non-empty because
+		// the overwhelming majority of rows are polls where it did, and a bar for "nothing went wrong"
+		// would dwarf every bar worth reading.
+		run(
+			groupQuery( {
+				dataset,
+				columns: [ blobColumn( 'upstreamReason' ) ],
+				where: `${ blobColumn( 'upstreamReason' ) } != ''`,
+				days,
+			} )
+		),
 
 		run(
 			groupQuery( {
@@ -291,8 +371,59 @@ export async function buildStatsData( env, config, rangeKey ) {
 
 	const networkRows = rowsToGroups( networks.data, [ 'asn', 'organization', 'country' ] );
 
+	// Against the imported constant, never a retyped string. This read `'setup'` until 2026-08-02
+	// while the recorded value has always been `'byos-setup'`, so the enrollment alarm — the single
+	// clearest signal that something other than your device has the URL — could never fire. It is the
+	// same rule `render.js` states for its label maps, and this is what breaking it costs.
+	// One entry per device, from its most recent poll. The rows arrive newest-first, so the first row
+	// seen for a MAC is that device's current state and every later one is history.
+	//
+	// **Keyed on the MAC even when it is empty.** A device that sends no `ID` header still gets a
+	// panel, under a name that says the header was missing — silently dropping it would hide exactly
+	// the device most worth looking at, since every one observed so far does send it.
+	const devices = [];
+	const seenDevices = new Set();
+
+	for ( const row of deviceRows.data ) {
+		const id = row.device_id ?? '';
+
+		if ( seenDevices.has( id ) ) {
+			continue;
+		}
+
+		seenDevices.add( id );
+
+		devices.push( {
+			deviceId: id,
+			lastSeen: row.timestamp ?? '',
+			model: row.model ?? '',
+			firmwareVersion: row.firmware_version ?? '',
+			firmwareCommit: row.firmware_commit ?? '',
+			clientIp: row.client_ip ?? '',
+			organization: row.organization ?? '',
+			country: row.country ?? '',
+			wifiBand: row.wifi_band ?? '',
+			batteryCharging: row.battery_charging ?? '',
+			usbConnected: row.usb_connected ?? '',
+			batteryCapacity: row.battery_capacity ?? '',
+			imageCached: row.image_cached ?? '',
+			updateSource: row.update_source ?? '',
+			wakeTime: row.wake_time ?? '',
+			outcome: row.outcome ?? '',
+			filenameTag: row.filename_tag ?? '',
+			upstreamReason: row.upstream_reason ?? '',
+			signal: toNumber( row.signal ),
+			voltage: toNumber( row.voltage ),
+			percent: toNumber( row.percent ),
+			batteryTemperature: toNumber( row.battery_temp ),
+			refreshRate: toNumber( row.refresh_rate ),
+			width: toNumber( row.width ),
+			height: toNumber( row.height ),
+		} );
+	}
+
 	const setupCalls = outcomeRows
-		.filter( ( row ) => row.outcome === 'setup' )
+		.filter( ( row ) => row.outcome === OUTCOMES.byosSetup )
 		.reduce( ( sum, row ) => sum + row.count, 0 );
 
 	return {
@@ -309,12 +440,16 @@ export async function buildStatsData( env, config, rangeKey ) {
 
 		outcomes: collapseOutcomes( outcomeRows ),
 
+		devices: { rows: devices, error: deviceRows.error },
+
 		identity: {
 			networks: networkRows,
 			networksError: networks.error,
 			firmware: rowsToGroups( firmware.data, [ 'firmwareVersion', 'model', 'width', 'height' ] ),
 			firmwareError: firmware.error,
 			setupCalls,
+			enrollments: rowsToGroups( enrollments.data, [ 'country', 'organization', 'model', 'firmwareVersion' ] ),
+			enrollmentsError: enrollments.error,
 			authorizedRequests: authorizedCount,
 			expectedRequests: expectedRequests( config, days ),
 		},
@@ -331,6 +466,7 @@ export async function buildStatsData( env, config, rangeKey ) {
 				bucket: row.bucket ?? '',
 				voltage: toNumber( row.voltage ),
 				percent: toNumber( row.percent ),
+				signal: toNumber( row.signal ),
 			} ) ),
 			error: battery.error,
 		},
@@ -338,6 +474,11 @@ export async function buildStatsData( env, config, rangeKey ) {
 		renderOutcomes: {
 			rows: rowsToGroups( renderOutcomes.data, [ 'filenameTag' ] ).filter( ( row ) => row.filenameTag !== '' ),
 			error: renderOutcomes.error,
+		},
+
+		upstreamReasons: {
+			rows: rowsToGroups( upstreamReasons.data, [ 'upstreamReason' ] ),
+			error: upstreamReasons.error,
 		},
 
 		badRequests: {

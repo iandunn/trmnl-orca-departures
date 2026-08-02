@@ -41,7 +41,7 @@ Two things the server can never fix, worth accepting rather than designing aroun
 
 ## Scratch work that did NOT survive
 
-~~The resvg spike lived in a session scratchpad and is gone.~~ **Rebuilt 2026-08-01 and kept this time**, at `.claude/tmp/cpu-spike/` — worker source, `wrangler.toml`, `package.json` and a sample render. It includes the quantization pass the original omitted, the hand-written 4-bit greyscale PNG encoder, and an antialiasing toggle. The corrected pattern is in `CLAUDE.md`; note that the version recorded there previously was broken in two ways (WOFF font, wasm as a Data module).
+~~The resvg spike lived in a session scratchpad and is gone.~~ **Rebuilt 2026-08-01 and kept this time**, at `assets/sources/` — worker source, `wrangler.toml`, `package.json` and a sample render. It includes the quantization pass the original omitted, the hand-written 4-bit greyscale PNG encoder, and an antialiasing toggle. The corrected pattern is in `CLAUDE.md`; note that the version recorded there previously was broken in two ways (WOFF font, wasm as a Data module).
 
 ## Goal
 

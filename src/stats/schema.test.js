@@ -87,6 +87,14 @@ describe( 'BLOB_FIELDS and DOUBLE_FIELDS', () => {
 			'userAgent',
 			'probePath',
 			'authorized',
+			'upstreamReason',
+			'deviceId',
+			'clientIp',
+			'wifiBand',
+			'firmwareCommit',
+			'batteryCharging',
+			'usbConnected',
+			'temperatureProfile',
 		] );
 	} );
 
@@ -111,7 +119,13 @@ describe( 'blobColumn and doubleColumn', () => {
 		[ 'outcome', 'blob1' ],
 		[ 'stopIds', 'blob5' ],
 		[ 'country', 'blob14' ],
-		[ 'authorized', `blob${ BLOB_FIELDS.length }` ],
+		// Pinned by absolute position, not as "the last one". `authorized` was last until
+		// `upstreamReason` was appended on 2026-08-01, and a relative assertion would have followed it
+		// silently — which is the one thing this test exists to prevent, since a column that moves
+		// reinterprets every historical row.
+		[ 'authorized', 'blob20' ],
+		[ 'upstreamReason', 'blob21' ],
+		[ 'temperatureProfile', `blob${ BLOB_FIELDS.length }` ],
 	] )( 'maps the %s blob to %s', ( name, column ) => {
 		expect( blobColumn( name ) ).toBe( column );
 	} );

@@ -1,7 +1,7 @@
 /**
  * The reference boards, reproducible from source.
  *
- * These replace the throwaway spike renders that used to live in `.claude/tmp/cpu-spike/` — they
+ * These replace the throwaway spike renders that used to live in `assets/sources/` — they
  * are the current design, not experiments, and the app regenerates them on demand.
  *
  * **Every value is real, verified live against OneBusAway.** Route numbers, headsigns, stop codes

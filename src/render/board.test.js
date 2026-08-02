@@ -82,6 +82,43 @@ describe( 'rowMetrics', () => {
 	} );
 } );
 
+describe( 'a group whose last bus has gone', () => {
+	const spent = ( tomorrow ) => ( {
+		...BUS_BOARD,
+		groups: [
+			{
+				...BUS_BOARD.groups[ 0 ],
+				rows: [],
+				reserved: 4,
+				message: 'No more departures today',
+				...( tomorrow ? { tomorrow } : {} ),
+			},
+		],
+	} );
+
+	it( 'says so, and says nothing else when tomorrow is unknown', () => {
+		const svg = buildBoardSvg( spent() );
+
+		expect( svg ).toContain( 'No more departures today' );
+		expect( svg ).not.toContain( 'Tomorrow' );
+	} );
+
+	// Both facts, not one: "nothing more today" and "here is the first one" are different answers, and
+	// someone reading this at midnight wants both.
+	it( 'lists tomorrow’s first departures under the sentence when they are known', () => {
+		const svg = buildBoardSvg(
+			spent( [ { badge: '5', to: 'Shoreline Greenwood', value: '5:12', unit: 'am', live: false } ] )
+		);
+
+		expect( svg ).toContain( 'No more departures today' );
+		expect( svg ).toContain( 'Shoreline Greenwood' );
+		expect( svg ).toContain( '5:12' );
+		// In the slot a scheduled row uses for `Scheduled` — the word that stops the number below it
+		// being read as the next bus.
+		expect( svg ).toContain( 'Tomorrow' );
+	} );
+} );
+
 describe( 'maxRowsPerGroup', () => {
 	// Row count is not configuration — it follows from the space the layout has — so the number the
 	// design was accepted at has to fall out of the geometry rather than be asserted into it.

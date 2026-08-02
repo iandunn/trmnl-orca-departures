@@ -30,8 +30,9 @@ import { buildFilename, FILENAME_TAGS, stableEpoch } from '../filename.js';
 import { loadBoard } from '../oba/index.js';
 import { buildBoardSvg } from '../render/board.js';
 import { buildNoticeSvg } from '../render/notice.js';
-import { toOneBusAwayId } from '../routing.js';
-import { badRequestScreen, renderFailedScreen, upstreamFailedScreen } from './screens.js';
+import { buildOvernightSvg } from '../render/overnight.js';
+import { currentSchedule, SCHEDULE_MODES } from '../schedule.js';
+import { badRequestScreen, overnightScreen, renderFailedScreen, upstreamFailedScreen } from './screens.js';
 
 /** JSON, and never a bare object — `status` has to be in the body of every single response. */
 function displayResponse( body ) {
@@ -41,14 +42,21 @@ function displayResponse( body ) {
 }
 
 /**
- * A description of the stop for the footer.
+ * A description of the stop for a notice screen's footer.
  *
- * Safe to draw on the glass — it is the owner's own sign — and safe to record, since `/stats`
- * already prints stop IDs by decision. Never put it in a raw path, which is what `redactPath()` and
- * `safeProbePath()` exist for.
+ * **What the agency prints on the pole, not the OneBusAway id.** These stop codes go on the glass, and
+ * `40_621 / 40_623` reads as debug output — on the one screen a reader is looking at, at the moment
+ * the sign is already degraded. The agency prefix is ours, not theirs: it says which regional feed the
+ * stop came from, which is meaningless to someone standing at it.
+ *
+ * `Stop No.` is said once rather than per stop, matching the direction bands on a working board.
+ *
+ * Safe to draw — it is the owner's own sign — and safe to record, since `/stats` already prints stop
+ * IDs by decision. Never put it in a raw path, which is what `redactPath()` and `safeProbePath()` are
+ * for. `toOneBusAwayId()` remains the right call for anything addressed *to* OneBusAway.
  */
 export function stopLabel( parsed ) {
-	return parsed.stopIds.map( ( stopId ) => toOneBusAwayId( parsed.agency, stopId ) ).join( ' / ' );
+	return `Stop No. ${ parsed.stopIds.join( ' / ' ) }`;
 }
 
 /**
@@ -76,23 +84,67 @@ export function imageUrl( request, basePath, filename ) {
 async function departuresScreen( parsed, env, config, nowMs, allowStale ) {
 	const result = await loadBoard( { env, config, parsed, nowMs, allowStale } );
 
+	// Carried on the screen rather than returned separately, so it survives whichever branch is taken
+	// and reaches `recordOutcome()` without a second channel. It never affects what is drawn — a
+	// reader does not need to know it was a 429 — and it is not part of the filename for the same
+	// reason: two outages that look identical on the glass must not make the panel repaint.
+	const { upstreamReason = '' } = result;
+
 	if ( ! result.ok ) {
-		return upstreamFailedScreen( {
-			nowMs,
-			timezone: config.timezone,
-			stopLabel: stopLabel( parsed ),
-		} );
+		return {
+			...upstreamFailedScreen( {
+				nowMs,
+				timezone: config.timezone,
+				stopLabel: stopLabel( parsed ),
+			} ),
+			upstreamReason,
+		};
 	}
 
 	return {
 		tag: result.empty ? FILENAME_TAGS.noDepartures : FILENAME_TAGS.departures,
 		board: result.board,
+		upstreamReason,
 	};
 }
 
-/** A screen is either a board or a notice, and only one builder handles each. */
+/** A board, the nightly rest screen, or a notice — one builder each, chosen by what is present. */
 function screenSvg( screen ) {
-	return screen.board ? buildBoardSvg( screen.board ) : buildNoticeSvg( screen.notice );
+	if ( screen.board ) {
+		return buildBoardSvg( screen.board );
+	}
+
+	if ( screen.overnight ) {
+		return buildOvernightSvg( screen.overnight );
+	}
+
+	return buildNoticeSvg( screen.notice );
+}
+
+/**
+ * Which of the three screens this request gets.
+ *
+ * The order is the design, not an accident:
+ *
+ * 1. **A malformed URL wins over everything**, including the schedule. The one thing this screen
+ *    exists for is a base URL mistyped at the captive portal, and pairing happens whenever the owner
+ *    is standing there — including at 10pm. A moon in place of the diagnostic would turn a two-second
+ *    fix into a mystery until morning.
+ * 2. **Outside the active window, we do not call OneBusAway at all.** The rest screen is built from
+ *    config, so there is no upstream request to fail, which is what makes it impossible for an outage
+ *    at 9:30 pm to pin an error screen to the glass all night.
+ * 3. Otherwise, departures.
+ */
+async function chooseScreen( target, env, config, nowMs, allowStale ) {
+	if ( ! target.parsed ) {
+		return badRequestScreen( { nowMs, timezone: config.timezone, reason: target.reason } );
+	}
+
+	if ( currentSchedule( { nowMs, config } ).mode === SCHEDULE_MODES.overnight ) {
+		return overnightScreen( { config } );
+	}
+
+	return departuresScreen( target.parsed, env, config, nowMs, allowStale );
 }
 
 /**
@@ -127,9 +179,7 @@ export async function currentScreen( target, env, nowMs, { allowStale = false } 
 	// Building the SVG is inside the same guard as choosing the screen, because a board assembled from
 	// upstream data can throw on the way to markup just as readily as fetching it can.
 	try {
-		screen = target.parsed
-			? await departuresScreen( target.parsed, env, config, nowMs, allowStale )
-			: badRequestScreen( { nowMs, timezone, reason: target.reason } );
+		screen = await chooseScreen( target, env, config, nowMs, allowStale );
 		svg = screenSvg( screen );
 	} catch ( error ) {
 		console.log( JSON.stringify( { event: 'byos-screen-failed', message: String( error ) } ) );
@@ -161,9 +211,23 @@ export async function handleDisplay( request, target, env ) {
 
 	let filename;
 	let tag = '';
+	let upstreamReason = '';
+
+	// Guarded even though `currentSchedule()` is pure arithmetic over a validated timezone and a
+	// `Date.now()` that cannot be non-finite. It is not defending against a known throw — it is
+	// defending against this field ever being absent, and an absent `refresh_rate` parses as 0, is
+	// written to NVS, and hot-loops the device flat across power cycles. The active rate is the safe
+	// fallback: worse for battery than a night's sleep, and harmless.
+	let refreshSeconds = config.refreshActiveSeconds;
 
 	try {
-		( { filename, screen: { tag } = {} } = await currentScreen( target, env, nowMs ) );
+		refreshSeconds = currentSchedule( { nowMs, config } ).refreshSeconds;
+	} catch ( error ) {
+		console.log( JSON.stringify( { event: 'byos-schedule-failed', message: String( error ) } ) );
+	}
+
+	try {
+		( { filename, screen: { tag, upstreamReason = '' } = {} } = await currentScreen( target, env, nowMs ) );
 	} catch ( error ) {
 		// The last resort. `buildFilename` throws on a bad tag or a bad epoch, and even that must not
 		// reach the device as a 500 — a fixed name is a frozen panel, which is survivable; a missing
@@ -175,14 +239,15 @@ export async function handleDisplay( request, target, env ) {
 
 	return {
 		tag,
+		upstreamReason,
 		response: displayResponse( {
 			status: 0,
 			image_url: imageUrl( request, target.basePath, filename ),
 			filename,
-			// One rate for now. Windowing it against `activeStartMinutes` / `activeEndMinutes`, and the
-			// overnight "seconds until morning", is step 8 of the task order in
-			// `docs/plans/initial-plan.md` — deliberately not half-built here.
-			refresh_rate: config.refreshActiveSeconds,
+			// Computed above rather than threaded out of `currentScreen()`, which needs the same answer
+			// to pick the screen. `currentSchedule()` is pure and both calls pass the same `nowMs`, so
+			// the two cannot disagree, and this one still has a value when the screen above threw.
+			refresh_rate: refreshSeconds,
 		} ),
 	};
 }

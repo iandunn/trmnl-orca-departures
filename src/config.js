@@ -29,10 +29,9 @@
  */
 export const CONFIG_DEFAULTS = {
 	timezone: 'America/Los_Angeles',
-	activeStart: '06:00',
-	activeEnd: '22:00',
+	activeStart: '06:30',
+	activeEnd: '21:30',
 	refreshActiveSeconds: 60,
-	refreshIdleSeconds: 900,
 	obaBaseUrl: 'https://api.pugetsound.onebusaway.org/api/where',
 	tarpitMs: 25000,
 };
@@ -172,7 +171,6 @@ function baseUrl( value, fallback ) {
  *   activeStartMinutes: number,
  *   activeEndMinutes: number,
  *   refreshActiveSeconds: number,
- *   refreshIdleSeconds: number,
  *   obaBaseUrl: string,
  *   tarpitMs: number,
  *   directionOverrides: Record<string, string>,
@@ -189,7 +187,6 @@ export function readConfig( env ) {
 			source.REFRESH_ACTIVE_SECONDS,
 			CONFIG_DEFAULTS.refreshActiveSeconds
 		),
-		refreshIdleSeconds: positiveInteger( source.REFRESH_IDLE_SECONDS, CONFIG_DEFAULTS.refreshIdleSeconds ),
 		obaBaseUrl: baseUrl( source.OBA_BASE_URL, CONFIG_DEFAULTS.obaBaseUrl ),
 		tarpitMs: nonNegativeInteger( source.TARPIT_MS, CONFIG_DEFAULTS.tarpitMs ),
 		directionOverrides: Object.freeze( stopLabelMap( source.DIRECTION_OVERRIDES ) ),

@@ -8,7 +8,7 @@
  * ## The thresholds are measured, not chosen
  *
  * Read off King County Metro's own Connectpoint signs, in the photographs kept at
- * `.claude/tmp/cpu-spike/metro official/`. Every photo carries the current time in its header, so
+ * `assets/sources/connectpoint-photos/`. Every photo carries the current time in its header, so
  * each row is a data point:
  *
  * | Photo                     | Header  | Largest `N min` | Smallest clock time |

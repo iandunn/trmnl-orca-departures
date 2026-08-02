@@ -31,7 +31,7 @@ Every 8th render additionally gets the slow deep clear rather than the fast one 
 
 **Design is settled and the renderer is real, committed source.** Updated 2026-08-01.
 
-**The design now lives in `src/` and is reproducible from source.** The spike in `.claude/tmp/cpu-spike/` is history, not the source of truth — its PNGs are a record of variants that were rejected along the way.
+**The design now lives in `src/` and is reproducible from source.** The spike in `assets/sources/` is history, not the source of truth — its PNGs are a record of variants that were rejected along the way.
 
 - `src/render/png.js` — quantise and 4-bit greyscale PNG encoder. Pure.
 - `src/render/board.js` — the board as SVG, data-driven, plus `directionLabel()`. Pure.
@@ -40,7 +40,9 @@ Every 8th render additionally gets the slow deep clear rather than the fast one 
 - `src/dev/sample-boards.js` — the two reference boards, from real OneBusAway data, four departures per direction. Rendered at a fixed reference instant; `?now=live` on a preview URL uses the real clock.
 - `src/dev/preview.js` — the local contact sheet. **Gated on `DEV_PREVIEW`, which lives in `.dev.vars` and is therefore never deployed.**
 - `src/config.js` — `readConfig()`, the only reader of `env` for a display or scheduling value. Coerces and range-checks everything and never throws; secrets stay off it on purpose. Added 2026-08-01.
-- `src/clock.js` — `formatBoardTime( timestampMs, timezone )`, the header fields and the "Updated at" stamp. Pure, and takes the timestamp rather than reading a clock, because the stamp must come from OneBusAway's `currentTime`. Added 2026-08-01.
+- `src/clock.js` — `formatBoardTime( timestampMs, timezone )`, the header fields and the "Updated at" stamp. Pure, and takes the timestamp rather than reading a clock, because the stamp must come from OneBusAway's `currentTime`. Added 2026-08-01. Also `localMinutesSinceMidnight()`, which the scheduler compares against the active window, and `formatMinuteOfDay()`, which renders a configured wall-clock time with no instant and no `Intl` — see the overnight screen below for why that distinction matters.
+- `src/schedule.js` — `currentSchedule( { nowMs, config } )`, the only thing that decides `refresh_rate`. Pure. Added 2026-08-01.
+- `src/render/overnight.js` — the nightly rest screen: a moon in the route badge, plus the layout variants still being chosen between. Pure. Added 2026-08-01.
 - `src/headsign.js` — `collapseRepeatedPhrases()`, which drops one copy of a phrase repeated back to back. Called by the renderer rather than by a data mapper, so it applies to live predictions and fixtures alike. Added 2026-08-01.
 - `src/route-badge.js` — `routeBadge()`, which strips ` Line` from the 13 single-character lines so `D Line` badges as `D`. Same seam and same reason as the headsign collapse. Added 2026-08-01.
 - `src/oba/` — live departures, added 2026-08-01. `client.js` fetches one stop and never throws; `memo.js` is the isolate-local cache that makes `/api/display` and `/image` agree; `departures.js` maps a response to board data and is pure; `format.js` is the `Now` / `N min` / clock ladder; `index.js` is the only entry point `src/byos/` uses. `fixtures/` holds four captured live responses for the public sample stops.
@@ -62,10 +64,12 @@ Three things about that wiring are worth knowing before changing it:
 - **The board is stamped with OneBusAway's `currentTime`, and with the oldest one when two stops answer.** Our own clock is used only for cache expiry. A board that cannot be honestly stamped is not drawn — `loadBoard()` returns a failure rather than falling back to `Date.now()`, because a stamp taken from our clock says nothing about how fresh the predictions are, which is the one claim it exists to make.
 
 - **Settled design decisions** are written up in the sections below: the Metro-faithful layout, the real-time vs scheduled treatment, Fira Sans, two-stop grouping, light-rail circle badges, the OneBusAway footer mark, and the sample stops.
-- **The config surface is done** (2026-08-01). `activeStartMinutes`/`activeEndMinutes` are read but have no consumer yet — the scheduler is their first one. `HEADER_TEXT` was removed rather than wired up; see the configuration section.
+- **The config surface is done** (2026-08-01). `HEADER_TEXT` was removed rather than wired up; see the configuration section. `REFRESH_IDLE_SECONDS` went the same way when the schedule landed — overnight is a single sleep, so there is no middle tier for it to describe.
 - **The request gate and the stats page are done** (2026-08-01), and both things they left classified-but-unserved are now served: an authorized request with an unusable stop renders an error board naming the wrong segment, and the `Access-Token` header is validated on `/api/display` and `/api/log`.
 - **Live OneBusAway data is wired in** (2026-08-01), including the format ladder, the mode split, and the per-stop failure treatment. See the two sections below.
-- **Next:** the `refresh_rate` schedule, and the failure-mode sweep. See `docs/TODO.md`.
+**The `refresh_rate` schedule is in, as of 2026-08-01** — `src/schedule.js`, plus the rest screen in `src/render/overnight.js`. Two states, not three: awake between `ACTIVE_START` and `ACTIVE_END` at `REFRESH_ACTIVE_SECONDS`, and one sleep until the window reopens outside it. See the section below.
+
+- **Next:** the failure-mode sweep. See `docs/TODO.md`.
 
 **A block comment containing a glob will silently break the build.** `**` followed by `/*` closes the comment early and the rest of the file parses as garbage. Write "a wasm glob" in prose instead.
 
@@ -376,7 +380,7 @@ Real routes there: northbound `H Line, 5, 17, 21, 24, 27, 28, 33, 40, 56, 57, 62
 
 #### Two stops on one board — the layout, variant 9
 
-`.claude/tmp/cpu-spike/variant-9-two-stops.png`. The groups are separated by a **light grey band** holding the direction, the stop name and the stop code. Four departures per direction, accepted 2026-08-01 after comparing against three — three left a visible dead band above the footer rule, and four fills the panel without the rows reading as cramped. The band is our invention — Metro's signs serve one stop, so they have no equivalent.
+`assets/sources/design-variants/variant-9-two-stops.png`. The groups are separated by a **light grey band** holding the direction, the stop name and the stop code. Four departures per direction, accepted 2026-08-01 after comparing against three — three left a visible dead band above the footer rule, and four fills the panel without the rows reading as cramped. The band is our invention — Metro's signs serve one stop, so they have no equivalent.
 
 **The stop name lives in the band, on every group, always — revised 2026-08-01.** It was in the footer once, which assumed a board is one street in both directions. That assumption does not hold: the two stops may be blocks apart and chosen independently, and even a true across-the-street pair can carry different names when the cross streets differ. So each band names its own stop, and a board whose groups happen to name the same one says it twice. The repetition is the point — the band is the single place a reader ever looks for the stop, rather than a place the name moves to depending on data the reader cannot see. The footer is now the "Updated at" stamp alone.
 
@@ -404,7 +408,7 @@ Collapsing `NW` to "Northbound" was considered and rejected: whether north or we
 
 #### The layout follows Metro's real Connectpoint sign — variant 8 is the reference
 
-Decided 2026-08-01 against photographs of the real signs, kept in `.claude/tmp/cpu-spike/metro official/`. The `King-County-Metro-Blog.jpg` photo is the clearest and is the one being matched; `.claude/tmp/cpu-spike/variant-8-metro-blog.png` is our render of it.
+Decided 2026-08-01 against photographs of the real signs, kept in `assets/sources/connectpoint-photos/`. The `King-County-Metro-Blog.jpg` photo is the clearest and is the one being matched; `assets/sources/design-variants/variant-8-metro-blog.png` is our render of it.
 
 **Kept from the official sign:**
 
@@ -443,7 +447,7 @@ Judge glyph shapes at a large size. An earlier pass called Source Sans 3 open fr
 
 #### Real-time vs scheduled — the per-row treatment, decided 2026-08-01
 
-Five variants were rendered at native 1872x1404 and compared as images rather than described. All are kept in `.claude/tmp/cpu-spike/variant-*.png`, generated by `spike.js` in the same folder.
+Five variants were rendered at native 1872x1404 and compared as images rather than described. All are kept in `assets/sources/design-variants/variant-*.png`, generated by `spike.js` in the same folder.
 
 **Variant E wins: no greying anywhere. A hollow route badge marks scheduled, plus an outlined `SCHED` pill.**
 
@@ -463,7 +467,7 @@ Also rejected: labelling every row `LIVE`/`SCHED` (variant B) spends ink and hor
 
 `Now` under a minute, `N min` through **10**, clock time from **11**. In `src/oba/format.js`, and nowhere else — the mapper emits a `departsAtMs` and a `live` flag, so revisiting the ladder is a change to that one file.
 
-The numbers were **measured, not chosen.** Every photograph in `.claude/tmp/cpu-spike/metro official/` carries the current time in its header, which makes every row a data point:
+The numbers were **measured, not chosen.** Every photograph in `assets/sources/connectpoint-photos/` carries the current time in its header, which makes every row a data point:
 
 | Photo | Header | Largest `N min` | Smallest clock time |
 | --- | --- | --- | --- |
@@ -492,6 +496,42 @@ Two stops fail independently, so half a board failing is the ordinary shape of a
 - **A stop with no service left is a different sentence** — `No more departures today` — and stays a board, tagged `noservc`. "We could not ask" is a fault and "nothing is coming" is an answer, and a reader has to be able to tell them apart.
 - **An empty group keeps its full share of the panel.** `reserved` on the group, honoured by `rowMetrics()`. Without it the surviving direction's rows grow to fill the gap, and a partial failure renders as a different design rather than as a missing half. The message is centred in that space, large: left-aligned at row size it was tried first and read as a caption someone forgot to finish.
 - **Row count comes from `maxRowsPerGroup()` in `render/board.js`**, which divides the panel by a legibility floor. Two stops get four each, which is the density the design was accepted at; a single-direction sign gets more, because it pays for one band instead of two and a gap. This is how row count stays derived rather than configured.
+
+#### The refresh schedule and the overnight rest screen — decided 2026-08-01
+
+**Two states, not three.** Awake from `ACTIVE_START` to `ACTIVE_END` — 06:30 to 21:30 Pacific — polling at `REFRESH_ACTIVE_SECONDS`. Outside that, one sleep until the window reopens. The earlier plan's middle tier (60s during commute windows, ~15 min the rest of the day) was dropped because there are no commute windows to describe: the sign polls at one rate the whole time it is on. `REFRESH_IDLE_SECONDS` was deleted rather than left unconsumed, on the same reasoning that removed `HEADER_TEXT`.
+
+**Outside the window the Worker never calls OneBusAway.** The rest screen is built from config alone. That is not a quota optimisation, it is what makes it impossible for an upstream outage at 9:30 pm to pin an error screen to the glass for nine hours — there is no request to fail.
+
+**Daylight saving is the whole of the difficulty, and it lives in one function.** `refresh_rate` is a duration, so the active cadence cannot be affected: 60 seconds is 60 seconds in March as in July. The entire exposure is "seconds until the next 6:30 am local", and the obvious form of it is wrong — `( activeStartMinutes + 1440 - nowMinutes ) * 60` assumes every night is 24 hours, while spring-forward is 23 and fall-back is 25. JavaScript converts an instant to local wall-clock time but not the reverse, so `nextOccurrenceMs()` projects the naive delta, formats the result back in the configured zone, and shifts by however far off it is. Bounded loop, and `src/schedule.test.js` pins both 2026 transitions.
+
+A wake margin of 60 seconds puts the morning wake just inside the window. A device whose timer drifts early is self-correcting anyway — the next opening is a minute away, not tomorrow's — but the margin keeps that off the normal path.
+
+**The rest screen is a moon in the route badge, and deliberately says nothing.** Metro logo, the badge centred, the stamp bottom left. No headline: any sentence about service would be false, because the sign has finished for the day and the buses have not, and "service resumes at 6:30 am" is exactly the wrong claim. It is not a failure screen and must not read as one.
+
+The badge is the sign's signature element — a filled rounded rectangle with a white glyph, where a route number goes — so putting the moon there says "off duty" in the vocabulary the board already taught the reader, rather than borrowing an icon from outside it. The header carries the logo alone: the word `Departures` is on a board because it is listing some. The footer's right-hand slot, where a board names its stop, is empty; a board names the stop in every band all day, and repeating it on a screen that says nothing else is noise.
+
+**The moon's optical shift is applied outside its rotation, and that ordering is the whole of the vertical centring.** A crescent occupies only the left part of the disc it is cut from, so it has to move right to sit on its own point — and inside the rotation that horizontal nudge becomes a diagonal one and lifts the moon visibly off the plate's centre line.
+
+**The footer says `Back at 6:30 am`, not `Updated at 9:30 pm`, and nothing is lost by the swap.** On a board the stamp is an observation — OneBusAway's own `currentTime` — and it is the whole defence against a silently frozen panel. On this screen it never was: every time here comes from config, so an `Updated at` line would read the same thing every night whatever had happened, which is a freshness claim that cannot be false and therefore cannot be informative. The opening time is what a reader standing in front of it actually wants, and a moon on the glass at noon is its own alarm without help.
+
+**Every time on it comes from config rather than the clock.** `formatMinuteOfDay()` renders a configured wall-clock time with no `Intl` call, because there is no instant to format. Two consequences, both intended:
+
+- It reads `6:30 am`, never a minute either side, whichever second the device's wake lands on.
+
+- The image is a pure function of config, so it is byte-identical every time it is served and the content half of its `filename` never moves. The epoch half still advances with `stableEpoch()`, whose 12-hour bucket rolls at about 02:00 Pacific — deliberately inside the sleep window, where nothing is awake to see it.
+
+**One consequence of `/image` rebuilding the current screen rather than looking up a stored one:** for the few seconds around `ACTIVE_END` or `ACTIVE_START`, `/api/display` can land one side of the boundary and the device's image fetch the other, so the bytes it downloads are the other screen. Nothing fails — `src/byos/image.js` ignores the requested filename by design — but the visual delta is a whole screen rather than a minute of clock movement, which is the same accepted drift `src/oba/memo.js` documents, at its widest. Twice a day, for the length of one HTTP round trip.
+
+No clock and no weekday or date in the header — on a board they catch a panel frozen since yesterday, but here they would name a moment this screen outlives by design, and a moon still on the glass at noon is already its own alarm.
+
+**A malformed URL outranks the schedule.** `chooseScreen()` checks the bad-path case first, because pairing happens whenever the owner is standing at the sign, including at 10pm, and a moon in place of the diagnostic turns a two-second fix into a mystery until morning.
+
+**The chosen layout is `badge-moon-inverse-stars`** — an inked panel, the moon plate reversed to paper, white stars, the header and footer rules but no bar, and `Wakes at 6:30 am` in the footer. Set as `DEFAULT_OVERNIGHT_VARIANT` in `src/render/overnight.js`, 2026-08-01.
+
+**`Wakes at`, never `Back at`.** The subject has to be the sign: "back at 6:30" invites the reading that Metro is not running until then, which is false — the buses keep going all night and only this panel stops. The whole screen exists to avoid making that claim, so its one line must not make it either.
+
+**The variants that lost are kept, not deleted**, and render at **`/_preview/parked`** rather than on the main sheet — a contact sheet that mixes what the sign draws with what it never will stops being a picture of the sign. Each draws the whole panel rather than dropping a glyph into a shared frame, because they differ in the header and the background as well as the middle. `LIVE_OVERNIGHT_VARIANTS` is what splits the two pages. The runner-up, `first-departures-inverse-moon`, lost on data rather than on taste: it needs `schedule-for-stop`, which nothing calls yet.
 
 #### Accepted risk, decided 2026-08-01
 
@@ -564,7 +604,17 @@ So:
 
 `/stats`, HTTP Basic on `STATS_PASSWORD`, matched **before** the token gate because it carries no path secret and would otherwise 404 as an unshaped path. Backed by Analytics Engine: free on the Workers Free plan at 100k writes and 10k read queries a day, written through a Worker binding and read through an HTTP SQL API that needs `CLOUDFLARE_ACCOUNT_ID` and a token scoped to Account Analytics read. **Expected volume is ~3-5k data points a day against that 100k** — there is no quota question, stated so nobody re-derives one.
 
-**Blob and double positions in `src/stats/schema.js` are permanent.** Analytics Engine rows are positional arrays with no schema, so inserting a field mid-list silently reinterprets every historical row, with no migration and no way to detect it afterwards. **Append only.** Queries reference columns through `blobColumn()` rather than writing `blob14`, so appending cannot shift a query onto the wrong column.
+**Blob and double positions in `src/stats/schema.js` are permanent.** Analytics Engine rows are positional arrays with no schema, so inserting a field mid-list silently reinterprets every historical row, with no migration and no way to detect it afterwards. **Append only.** Queries reference columns through `blobColumn()` rather than writing `blob14`, so appending cannot shift a query onto the wrong column. `src/stats/schema.test.js` pins the order by absolute position — never as "the last one", which would silently follow a column that moved.
+
+**`deviceId` is the MAC address, from the `ID` header, and it is the only stable per-device key.** Appended 2026-08-02 along with `clientIp`, `wifiBand`, `firmwareCommit`, `batteryCharging`, `usbConnected` and `temperatureProfile`. Everything else the firmware sends describes a *kind* of device — model, geometry, firmware build — so before this two identical signs were indistinguishable in the dataset, which is exactly the case the identity alarms exist to catch. **There is no serial number**; the firmware sends none, so the MAC stands in for one.
+
+The per-device panels are the only place two devices are ever separated. They group raw recent rows in JS rather than with a `GROUP BY`: *latest* is the question, and the aggregate a group-by can give — an average voltage — is not what a device box is asking for.
+
+**`upstreamReason` records why OneBusAway did not answer, including on partial failures.** One stop answering is enough for a board, so a degrading quota never reaches `obafail` and would be invisible until it was total. The HTTP status is folded into the slug — `http-429`, not `http-status` — because the status is the whole content of that reason. It is deliberately **not** part of the `filename`: two outages that look identical on the glass must not repaint the panel.
+
+**`clientIp` is recorded, which extends the screenshot warning.** A `/stats` screenshot now carries an IP as well as roughly a home address. Same reasoning as the geo and network columns: on a single-device sign the address is a constant, and a constant is what makes a deviation legible if the URL token ever leaks.
+
+**Compare filters against the `OUTCOMES` constants, never a retyped string.** The enrollment alarm was dead from the day it was written because `query.js` matched `'setup'` while the recorded value has always been `'byos-setup'`. `render.js` already states this rule for its label maps; that bug is what breaking it costs, and nothing in the test suite would have caught it.
 
 **Geo and network are recorded on authenticated requests too, and that is deliberate.** The instinct to strip them is wrong: on a single-device sign the network is a constant, and that is exactly what makes a deviation legible. If the URL token ever leaks, the attacker authenticates *successfully*, and a change of network is the only signal that would ever exist. Cloudflare's own request logs hold the client IP regardless, so omitting it would deny the owner the one view where a compromise is visible without denying anyone else anything. The Device identity panel is built for this and is designed so the normal state is one calm line.
 

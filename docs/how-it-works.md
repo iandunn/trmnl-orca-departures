@@ -12,7 +12,7 @@ TRMNL devices normally talk to TRMNL's own servers. This project uses **BYOS** (
 
 So there is nothing to convert into a plugin. Pointing the device's server URL at the Worker *is* how this loads.
 
-The last option was chosen because the hosted path cannot express the things this sign depends on — a content-hash `filename` (the whole flicker and error-screen design), a server-controlled `refresh_rate` (commute windows and overnight sleep), and keeping the stop out of anyone else's account — and because Terminus, which can express all three, cannot run serverless. A sign whose worst failure is an unreachable server should not depend on a box in a closet. [alternatives.md](alternatives.md) is the full comparison, including a Pi, GitHub Pages, and what running Terminus would have gained.
+The last option was chosen because the hosted path cannot express the things this sign depends on — a content-hash `filename` (the whole flicker and error-screen design), a server-controlled `refresh_rate` (the active window and the overnight sleep), and keeping the stop out of anyone else's account — and because Terminus, which can express all three, cannot run serverless. A sign whose worst failure is an unreachable server should not depend on a box in a closet. [alternatives.md](alternatives.md) is the full comparison, including a Pi, GitHub Pages, and what running Terminus would have gained.
 
 - `GET /api/setup` — first contact; issues the device an API key.
 - `GET /api/display` — the workhorse. Returns the image URL, a cache-key filename, and the number of seconds to sleep before polling again.

@@ -46,10 +46,12 @@ They show live departures, from `src/oba/`. A poll that cannot produce a board �
 | `src/oba/` | Live departures: `client.js` (one fetch per stop, never throws), `memo.js` (the isolate-local cache that keeps `/api/display` and `/image` agreeing), `departures.js` (response to board data, pure), `format.js` (the `Now` / `N min` / clock ladder), `index.js` (the only entry point `src/byos/` uses), `fixtures/` (captured live responses). |
 | `src/config.js` | `readConfig()` — the only reader of `env` for a display or scheduling value. |
 | `src/clock.js` | `formatBoardTime()` — the header fields and the "Updated at" stamp, in the configured timezone. |
+| `src/schedule.js` | `currentSchedule()` — awake or asleep, and the `refresh_rate` that follows. Contains all the daylight-saving arithmetic. Pure. |
 | `src/routing.js` | Path parsing and the constant-time token comparison. |
 | `src/filename.js` | The content-hash cache key the device caches images by. |
 | `src/render/board.js` | The board as SVG, data-driven. Pure. |
 | `src/render/notice.js` | The degraded screen, as SVG. Deliberately not shaped like the board. Pure. |
+| `src/render/overnight.js` | The nightly rest screen — a moon in the route badge. Built from config, so its bytes never move. Pure. |
 | `src/render/png.js` | Quantise and 4-bit greyscale PNG encoder. Pure. |
 | `src/render/index.js` | resvg wiring — the only module that touches wasm or fonts. |
 | `src/assets/` | Logos, pre-cleaned and pre-recoloured at author time so nothing is reprocessed per render. |
@@ -87,6 +89,8 @@ Boards render at a fixed reference instant so the departure times stay consisten
 
 **Look at the image, not just the status code.** A textless render is a valid PNG of a plausible size, and a font that fails to load produces exactly that. More than one afternoon has gone to a 200 that drew nothing.
 
+**Designs that were considered and rejected render at [/_preview/parked](http://localhost:8788/_preview/parked)**, kept off the main sheet on purpose: a contact sheet that mixes what the sign draws with what it never will stops being a picture of the sign. `LIVE_OVERNIGHT_VARIANTS` in `src/render/overnight.js` decides which page a variant lands on, so the two cannot drift. Switching the chosen design back is one word; delete the losers once the device has confirmed the pick.
+
 ## Stats page preview
 
 The same flag serves the stats page against mock data at **http://localhost:8788/_preview/stats**, through the identical `renderStatsHtml()` the real route uses. That matters because the page's most important states are the ones you cannot conveniently produce on demand — a second network appearing, a fuel gauge returning `-1`, one panel's query failing while the rest of the page survives. `buildMockStatsData()` in `src/stats/render.js` fabricates them, including an HTML-injection payload so the escaping stays exercised.
@@ -102,6 +106,8 @@ Also behind the same flag: **http://localhost:8788/_preview/byos** drives all fo
 **The checks run server-side, and that is deliberate.** Driving them from browser `fetch()` would mean embedding the device token in a page, and the whole access design rests on that string never leaving `.dev.vars` and device NVS. So the Worker calls its own `gate()` → `dispatchByos()` pipeline directly and inlines the rendered PNGs as data URIs. `src/dev/byos-check.js` runs the checks; `src/dev/byos-page.js` renders them and is pure, so the layout is testable without a Worker.
 
 Two limits worth knowing. It composes `gate()` and `dispatchByos()` the way `src/worker.js` does rather than importing the worker — importing it would be a cycle — so it covers the whole device request path but not that those two are wired together correctly, which is what `src/worker.test.js` is for. And it disables the tarpit for the run, because one check requests an unshaped path deliberately and at the real 25 seconds the page would look hung.
+
+For the cases the page does not cover — a header it does not vary, a deployed Worker rather than a local one, reproducing something a real device did — [manual-testing.md](manual-testing.md) has the `curl` for each of the four routes and what to check in the output.
 
 ## Reading the device's logs
 

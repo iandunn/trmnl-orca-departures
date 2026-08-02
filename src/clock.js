@@ -59,6 +59,64 @@ export function formatClockTime( timestampMs, timezone ) {
 }
 
 /**
+ * Where an instant falls in its local day, as minutes since local midnight.
+ *
+ * The scheduler compares against `activeStartMinutes` / `activeEndMinutes`, which `readConfig()`
+ * already stores in this form, so this is the other half of that comparison.
+ *
+ * `hourCycle: 'h23'` rather than `hour12: false`, which is not the same thing: the latter leaves ICU
+ * free to use the h24 cycle, where midnight formats as `24` rather than `00` and every overnight
+ * comparison would be off by a day. The modulo is belt and braces on top of that.
+ *
+ * @param {number} timestampMs
+ * @param {string} timezone
+ * @returns {number} 0-1439.
+ */
+export function localMinutesSinceMidnight( timestampMs, timezone ) {
+	if ( ! Number.isFinite( timestampMs ) ) {
+		throw new TypeError(
+			`localMinutesSinceMidnight needs epoch milliseconds, got ${ JSON.stringify( timestampMs ) }`
+		);
+	}
+
+	const time = partsOf( timestampMs, timezone, {
+		hour: '2-digit',
+		minute: '2-digit',
+		hourCycle: 'h23',
+	} );
+
+	return ( Number( time.hour ) % 24 ) * 60 + Number( time.minute );
+}
+
+/**
+ * A configured wall-clock time as the pieces the header and the stamp draw.
+ *
+ * Arithmetic rather than `Intl`, which is the one place in this file that is not, and deliberately:
+ * there is no instant here to format. `ACTIVE_END` is a time of day, not a moment, so the `Intl` path
+ * would mean inventing an epoch that lands on it in the configured zone — which is exactly the
+ * DST-sensitive search `src/schedule.js` exists to contain, spent to produce a string that does not
+ * depend on the answer.
+ *
+ * That is what makes the overnight screen a pure function of config: it renders identically no matter
+ * when it is served, so its bytes and therefore its `filename` never move.
+ *
+ * @param {number} minuteOfDay 0-1439, as `readConfig()` stores the active window.
+ * @returns {{ clock: string, meridiem: string, label: string }}
+ */
+export function formatMinuteOfDay( minuteOfDay ) {
+	if ( ! Number.isInteger( minuteOfDay ) || minuteOfDay < 0 || minuteOfDay > 1439 ) {
+		throw new RangeError( `formatMinuteOfDay needs 0-1439, got ${ JSON.stringify( minuteOfDay ) }` );
+	}
+
+	const hour24 = Math.floor( minuteOfDay / 60 );
+	const minute = String( minuteOfDay % 60 ).padStart( 2, '0' );
+	const clock = `${ hour24 % 12 === 0 ? 12 : hour24 % 12 }:${ minute }`;
+	const meridiem = hour24 < 12 ? 'am' : 'pm';
+
+	return { clock, meridiem, label: `${ clock } ${ meridiem }` };
+}
+
+/**
  * The four header fields plus the "Updated at" stamp.
  *
  * The date carries **no comma** after the weekday, matching Metro's own sign, and the weekday and

@@ -24,8 +24,9 @@
  * is exactly matched.
  */
 
-import { formatBoardTime } from '../clock.js';
+import { formatBoardTime, formatMinuteOfDay } from '../clock.js';
 import { FILENAME_TAGS } from '../filename.js';
+import { DEFAULT_OVERNIGHT_VARIANT } from '../render/overnight.js';
 
 /**
  * A screen with no clock on it.
@@ -49,8 +50,45 @@ function clockFields( timestampMs, timezone ) {
  * @typedef  {object} Screen
  * @property {string} tag One of `FILENAME_TAGS`. Keeps every state's filename distinct from every
  *                        other, so the cache can never suppress a degraded screen.
- * @property {import('../render/notice.js').Notice} notice
+ * @property {import('../render/notice.js').Notice} [notice]
+ * @property {import('../render/overnight.js').Overnight} [overnight] The nightly rest screen, which
+ *           has its own builder because it carries an icon and no sentence.
  */
+
+/**
+ * The sign has finished for the day.
+ *
+ * **Built from config alone — nothing here reads a clock or calls upstream.** The times are
+ * `ACTIVE_END` and `ACTIVE_START` rendered as wall-clock strings, so the screen is byte-identical
+ * whenever it is served. That is also why it always reads 9:30 pm rather than 9:31 when the device's
+ * wake drifts a minute past the boundary.
+ *
+ * The stop is deliberately not passed through. A board names it in every direction band all day; a
+ * screen that says nothing else does not need to say that either.
+ *
+ * @param {object} options
+ * @param {object} options.config    As returned by `readConfig()`.
+ * @param {string} [options.variant] One of `OVERNIGHT_VARIANT_NAMES`.
+ * @param {Array}  [options.rows]    Tomorrow's first departures, for the variant that draws them.
+ *                                   Nothing produces these outside the preview yet: they need
+ *                                   OneBusAway's `schedule-for-stop`, and calling upstream overnight
+ *                                   is the property this screen exists to protect.
+ * @returns {Screen}
+ */
+export function overnightScreen( { config, variant = DEFAULT_OVERNIGHT_VARIANT, rows = [] } ) {
+	const opens = formatMinuteOfDay( config.activeStartMinutes );
+
+	return {
+		tag: FILENAME_TAGS.overnight,
+		overnight: {
+			variant,
+			resumeClock: opens.clock,
+			resumeMeridiem: opens.meridiem,
+			resumeLabel: opens.label,
+			rows,
+		},
+	};
+}
 
 /**
  * OneBusAway could not be reached, or answered with nothing usable, for every stop on the board.

@@ -13,7 +13,7 @@
 import { formatBoardTime } from '../clock.js';
 import { maxRowsPerGroup } from '../render/board.js';
 import { toOneBusAwayId } from '../routing.js';
-import { loadStop } from './client.js';
+import { loadStop, OBA_FAILURE_REASONS } from './client.js';
 import { dataTimestamp, hasDepartures, stopReference, toBoard } from './departures.js';
 import { lastGood } from './memo.js';
 
@@ -47,6 +47,34 @@ function logFailure( result ) {
 }
 
 /**
+ * The same failures as one short string, for `/stats`.
+ *
+ * `logFailure()` above is the detailed record and is fine for someone watching a tail. This is the
+ * queryable one: `filenameTag` already says a poll ended in `obafail`, which is *that* it failed and
+ * never *why*, and 429-because-the-key-is-rate-limited has a fix while a timeout does not.
+ *
+ * **The HTTP status is folded into the slug** — `http-429`, not `http-status` — because the status is
+ * the whole content of that reason. Distinct reasons are joined, so two stops failing differently
+ * stay distinguishable, and the values stay short enough to group on.
+ *
+ * Empty when every stop answered, which is the overwhelming majority of rows.
+ *
+ * @param {Array} results
+ * @returns {string}
+ */
+function summariseFailures( results ) {
+	const reasons = results
+		.filter( ( result ) => ! result.ok )
+		.map( ( result ) =>
+			result.reason === OBA_FAILURE_REASONS.httpStatus && result.detail !== undefined
+				? `http-${ result.detail }`
+				: result.reason
+		);
+
+	return [ ...new Set( reasons ) ].sort().join( ' ' );
+}
+
+/**
  * @param {object}  options
  * @param {object}  options.env
  * @param {object}  options.config      From `readConfig()`.
@@ -73,8 +101,10 @@ export async function loadBoard( { env, config, parsed, nowMs, allowStale = fals
 
 	results.filter( ( result ) => ! result.ok ).forEach( logFailure );
 
+	const upstreamReason = summariseFailures( results );
+
 	if ( results.every( ( result ) => ! result.ok ) ) {
-		return { ok: false, reason: BOARD_FAILURE_REASONS.upstream };
+		return { ok: false, reason: BOARD_FAILURE_REASONS.upstream, upstreamReason };
 	}
 
 	const timestamp = dataTimestamp( results );
@@ -113,5 +143,8 @@ export async function loadBoard( { env, config, parsed, nowMs, allowStale = fals
 		board,
 		complete: results.every( ( result ) => result.ok ),
 		empty: ! hasDepartures( board ),
+		// Recorded on a board that drew, because a partial failure never reaches `obafail` and would
+		// otherwise be invisible — which is exactly how a quota problem starts.
+		upstreamReason,
 	};
 }
