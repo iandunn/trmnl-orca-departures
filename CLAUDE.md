@@ -36,7 +36,7 @@ Every 8th render additionally gets the slow deep clear rather than the fast one 
 - `src/render/png.js` — quantise and 4-bit greyscale PNG encoder. Pure.
 - `src/render/board.js` — the board as SVG, data-driven, plus `directionLabel()`. Pure.
 - `src/render/index.js` — resvg wiring; the only module that touches wasm or fonts.
-- `src/assets/` — the Metro logo as a data URI and the OneBusAway mark pre-cleaned and pre-recoloured, both generated at author time so nothing is reprocessed per render. The OBA mark is **kept but no longer drawn**; see the asset notes in the layout section.
+- `src/assets/` — the Metro logo as a data URI and the OneBusAway mark pre-cleaned and pre-recoloured, both generated at author time so nothing is reprocessed per render. The OBA mark is **kept but no longer drawn**; see the asset notes in `src/render/CLAUDE.md`.
 - `src/dev/sample-boards.js` — the two reference boards, from real OneBusAway data, four departures per direction. Rendered at a fixed reference instant; `?now=live` on a preview URL uses the real clock.
 - `src/dev/preview.js` — the local contact sheet. **Gated on `DEV_PREVIEW`, which lives in `.dev.vars` and is therefore never deployed.**
 - `src/config.js` — `readConfig()`, the only reader of `env` for a display or scheduling value. Coerces and range-checks everything and never throws; secrets stay off it on purpose. Added 2026-08-01.
@@ -51,6 +51,8 @@ Every 8th render additionally gets the slow deep clear rather than the fast one 
 - `src/abuse.js` — `classifyRequest()`, `diagnosePath()`, the tarpit, and the `OUTCOMES` / `REJECTION_REASONS` vocabularies. Added 2026-08-01.
 - `src/stats/` — `schema.js` (the positional Analytics Engine row, the 20-column ceiling, plus `safeProbePath()`), `analytics.js` (the write path), `device-telemetry.js` (the per-device dataset, added 2026-08-02), `device-logs.js` (`/api/log` history), `query.js` (the SQL reads), `render.js` (pure HTML), `handler.js` (Basic auth). Added 2026-08-01.
 
+**Two directories carry their own `CLAUDE.md`, which loads only when you work under them** — `src/render/CLAUDE.md` for the board design, and `src/stats/CLAUDE.md` for the Analytics Engine schema and the `/stats` panels. Split out of this file on 2026-08-02 because both are long, and neither is needed to reason about anything outside its directory. Read the relevant one before changing that area; do not re-derive a decision that is written down there.
+
 **`vitest.config.js` aliases `.wasm` and `.ttf` to a stub** so modules that transitively import the renderer can still be unit tested; nothing depending on those contents is asserted.
 
 **The four device routes are implemented, in `src/byos/`.** Landed together, 2026-08-01, one file per endpoint: `setup.js`, `display.js`, `log.js`, `image.js`, with `index.js` dispatching on the gate's classification, `credentials.js` deriving the `api_key`, and `screens.js` choosing what to draw. `src/worker.js` is now nothing but the seam between `gate()` and that dispatch. Verified end to end against `wrangler dev` and by looking at the rendered PNG, not just its status code: `Content-Type: image/png` exactly, 1872x1404 4-bit greyscale, and PNG magic bytes on `/image/setup`, which is the URL pairing depends on.
@@ -63,10 +65,10 @@ Three things about that wiring are worth knowing before changing it:
 - **`/api/display` and `/image` share one upstream response**, through `src/oba/memo.js`. Without it the device paints bytes rendered from a different fetch than the one its `filename` was hashed over, and OneBusAway gets asked twice per wake instead of once.
 - **The board is stamped with OneBusAway's `currentTime`, and with the oldest one when two stops answer.** Our own clock is used only for cache expiry. A board that cannot be honestly stamped is not drawn — `loadBoard()` returns a failure rather than falling back to `Date.now()`, because a stamp taken from our clock says nothing about how fresh the predictions are, which is the one claim it exists to make.
 
-- **Settled design decisions** are written up in the sections below: the Metro-faithful layout, the real-time vs scheduled treatment, Fira Sans, two-stop grouping, light-rail circle badges, the OneBusAway footer mark, and the sample stops.
+- **Settled design decisions** are written up in `src/render/CLAUDE.md`: the Metro-faithful layout, the real-time vs scheduled treatment, Fira Sans, two-stop grouping, light-rail circle badges, the OneBusAway footer mark, and the sample stops.
 - **The config surface is done** (2026-08-01). `HEADER_TEXT` was removed rather than wired up; see the configuration section. `REFRESH_IDLE_SECONDS` went the same way when the schedule landed — overnight is a single sleep, so there is no middle tier for it to describe.
 - **The request gate and the stats page are done** (2026-08-01), and both things they left classified-but-unserved are now served: an authorized request with an unusable stop renders an error board naming the wrong segment, and the `Access-Token` header is validated on `/api/display` and `/api/log`.
-- **Live OneBusAway data is wired in** (2026-08-01), including the format ladder, the mode split, and the per-stop failure treatment. See the two sections below.
+- **Live OneBusAway data is wired in** (2026-08-01), including the format ladder, the mode split, and the per-stop failure treatment. See `src/render/CLAUDE.md`.
 **The `refresh_rate` schedule is in, as of 2026-08-01** — `src/schedule.js`, plus the rest screen in `src/render/overnight.js`. Two states, not three: awake between `ACTIVE_START` and `ACTIVE_END` at `REFRESH_ACTIVE_SECONDS`, and one sleep until the window reopens outside it. See the section below.
 
 - **Next:** the failure-mode sweep. See `docs/TODO.md`.
@@ -75,7 +77,7 @@ Three things about that wiring are worth knowing before changing it:
 
 The scaffolding notes below remain accurate.
 
-- `package.json`, `wrangler.toml`, `.nvmrc`, `eslint.config.js`, `src/worker.js`, `src/worker.test.js` exist. `npm test`, `npm run lint`, `wrangler deploy --dry-run` and `wrangler dev` were all confirmed working against this exact config.
+- `npm test`, `npm run lint`, `wrangler deploy --dry-run` and `wrangler dev` were all confirmed working against this exact config.
 - **The endpoints went in together, and that rule still governs edits to them.** A partial `/api/display` that omits `refresh_rate` flat-batteries the device, and a body of `{"status": 500}` factory-resets it. `/api/display` is only correct while `refresh_rate`, `filename` and `status: 0` are all right *together* — so never change one of the three without checking the other two, and never let a code path return early without a `refresh_rate`.
 - **Deployed and live as of 2026-08-01.** `/stats` was confirmed recording real traffic, including an authenticated request, which is what proves `DEVICE_TOKEN` matches end to end. No device has been paired. The deployed origin is in `.dev.vars` as `WORKER_ORIGIN`, not here.
 - The CPU/hosting question below is **resolved** — Workers Free fits with ~17x headroom. Nothing is blocked on it.
@@ -329,175 +331,11 @@ Real Connectpoint signs show countdowns because they are wired, monitored, and r
 - **Never let the countdown be more prominent than the as-of stamp is legible.** If someone can read "4 min" from the doorway, they must be able to read the staleness cue from the doorway too.
 - Row 5 is a different lie from rows 1-4: a **scheduled** time is not stale, it is unverified. Label it as such. An unlabeled scheduled time claims a bus exists that may have been cancelled.
 
-#### Sample stops for mockups — downtown Seattle, never the real one
+#### The board design — see `src/render/CLAUDE.md`
 
-All verified live against OneBusAway. **Never use the stop this sign actually points at** — these exist so no render or committed image can leak it.
+The design record — sample stops, the two-stop band layout, the Connectpoint reference, the real-time vs scheduled treatment, the format ladder, and the partial-failure treatment — lives in `src/render/CLAUDE.md`, which loads automatically when working under that directory. Read it before changing anything the sign draws.
 
-| Pair | Stops | Name | Directions | Notes |
-| --- | --- | --- | --- | --- |
-| **Bus, default** | `1_600` / `1_430` | 3rd Ave & Virginia St / 3rd Ave & Pine St | `NW` / `SE` | **Not a matched pair** — two stops 313 m apart, chosen independently. The standard sample; see below for why. |
-| Bus, matched pair | `1_590` / `1_430` | 3rd Ave & Pine St | `NW` / `SE` | 16 and 13 routes. The former default, kept for the two-sides-of-one-street case. |
-| Bus, denser | `1_600` / `1_420` | 3rd Ave & Virginia St | `NW` / `SE` | 21 routes each, all four RapidRide lines on both sides. Use when the layout needs stressing. |
-| **Light rail** | `40_621` / `40_623` | Int'l District/Chinatown | `N` / `S` | 1 Line and 2 Line. |
-| Light rail, alt | `40_1121` / `40_1108` | Westlake | `NE` / `SW` | Same two lines; ID/Chinatown is preferred. |
-
-**The default bus sample is deliberately two unrelated stops, decided 2026-08-01.** 3rd Ave interleaves two stop zones — the "south end" routes (`7`, `13`-downtown-only, `14`, `36`, `4`, `70`) call at Pine, Union, Marion and James, while the West Seattle and south-county routes (`H`, `C`, `21`, `125`, `124`, `131`, `132`) call at Pike, Seneca and Columbia. Verified against `stops-for-route` for all of them: **the `7` signed for Rainier Beach shares no stop anywhere in the system with `125`, `C`, or `H` signed for Burien**, and the `D` to Ballard overlaps it only at `1_515`, which has no same-named counterpart. So no matched pair can show both a southbound `7` → Rainier Beach and a northbound `D` → Ballard, and picking the two stops independently is the only way to demo both.
-
-That is a real configuration rather than a cheat: `/token/<token>/agency/1/stop/1_600,1_430` is two arbitrary stop IDs under one agency, which the URL shape already allows, and a sign serves whichever stops its owner actually walks to.
-
-**International District is the right rail sample, not Westlake.** It is where the two lines diverge, and northbound *both* lines show the identical destination "Lynnwood City Center" — so the line number is the only thing separating those rows. Any badge design has to survive that. Southbound splits properly: `1 Line` → Federal Way Downtown, `2 Line` → Downtown Redmond.
-
-**Bus stops and rail stops never mix.** Light rail has its own platforms, so a board is one mode or the other and the two badge styles never appear together. The renderer still has to handle both.
-
-Use real route numbers and headsigns in mockups. Invented ones hide width problems — `570` and `131` are wider than the `40` early renders were tuned against, and real headsigns are far longer than anything invented.
-
-**Fixtures keep the raw headsign; the renderer shortens it.** `collapseRepeatedPhrases()` in `src/headsign.js` drops one copy of a back-to-back repeat, so `Mount Baker Mount Baker Transit Center` draws as `Mount Baker Transit Center`. Metro concatenates destination with via-point and no separator, so the stutter is what OneBusAway actually returns — pre-shortening it in a fixture would hide the problem rather than solve it, which is what an earlier sample did.
-
-**Badges come from the API too, and `D Line` does not fit a 152px box.** `routeBadge()` in `src/route-badge.js` strips ` Line` when a single character precedes it — 13 routes region-wide, and they are the ones a Seattle sign is most likely to show: all eight RapidRide lines, both Link lines, Tacoma Link's `T Line` and both Sounder lines. None of those has a route number; the letter *is* the designation, and both agencies print it that way, so this matches their signage rather than inventing an abbreviation.
-
-**The badge slot holds an official designation or nothing** — a number, a number with an express suffix like Intercity Transit's `9X`, or a single letter. **Fitting is necessary but not sufficient**: `STCL` and `TA034` are short enough to draw and still do not belong there, because they read as internal codes rather than as the route a rider asks for. A route that fails the test gets a **blank slot**, and its name moves to the head of the destination instead — `Swift Blue: Shoreline North/185th Station`, `STCL: Stream TDS / Spanaway TC`, via `destinationWithRoute()`. The row is the only place with horizontal room, and the alternative was a row saying where a vehicle goes without saying which vehicle. A colon rather than a middle dot or em dash, so it survives font subsetting.
-
-The rejected alternatives, since each looks reasonable until measured: a font-size ladder reaches about five characters and does nothing for a thirty-character name; widening the badge breaks the fixed destination column that keeps rows aligned across modes; and initials would invent signage nobody prints, with three Sound Transit routes all named `Shuttle` colliding anyway.
-
-**The destination shrinks to fit rather than running into the time column, and the whole board shrinks together.** `destinationSize()` in `render/board.js` caps the type at the row's own scale and steps it down when the longest string on the board is too long for the space between the badge slot and the time. **Per board, not per row** — fitting each row independently puts two type sizes in one column, and that reads as a rendering fault rather than as a fit. The cost is that a short destination is drawn smaller because a different row is long. The failure it fixes is counter-intuitive and was invisible for a long time: `rowMetrics()` clamps rather than stretches, so a board with **two** departures draws them at full size and the region's longest headsign — `Pioneer Square Chinatown International District Waterfront` — ran straight through `4:47 pm`, while the same string on an eight-row board fitted comfortably. The overlap appeared when the sign had least on it.
-
-Nothing here can measure a string — resvg does the shaping and the font is only loaded in `render/index.js` — so the fit uses an average advance per character, calibrated against a render of that longest headsign at 0.46 and rounded up to 0.5 for slack. That is an estimate and is documented as one; it costs a slightly smaller size on the few rows that need shrinking and protects against wider letterforms than the string it was measured on.
-
-**A route with no short name at all falls back to its long name, but only when that is a service name.** 39 routes have no `shortName` — every Washington State Ferries route, and Amtrak Cascades. The split in `longName` is exact and worth knowing: Amtrak's is `Amtrak Cascades`, a service, so the row reads `Amtrak Cascades: Portland`; all 38 ferry routes are endpoint pairs like `Bainbridge Island - Seattle`, and prefixing one would produce `Bainbridge Island - Seattle: To Seattle`, restating the destination to say nothing. So a ferry row is a blank slot and a bare destination, which is accepted — a ferry has no route number, and `To Seattle` is verbatim what OneBusAway returns for that direction.
-
-Drawing the plate for a nameless route would put a black block where a number belongs, which reads as a rendering fault; the destination column is a fixed x, so a blank slot keeps every row aligned.
-
-**The awkward cases are all rendered side by side at `/_preview`**, built by `src/dev/edge-case-boards.js` — badge overflow in both bus and rail, the headsigns that must and must not collapse, the longest stop name, a stop with no compass bearing, and a sparse board at the row-height ceiling. Real names throughout; the co-location is synthetic and each group says so on itself.
-
-**The rule is adjacency, never word frequency, and that distinction is the whole design.** `Seattle Pacific University Seattle Center W` and `Rainier Beach Via Rainier Ave S` each repeat a word while naming two different places; collapsing either would destroy the destination rather than shorten it. Only an immediate repeat is a stutter. `src/headsign.test.js` pins every one of those live headsigns as unchanged, which is the regression guard for anything cleverer added later.
-
-Two reasons this is the standing choice, and both matter:
-
-- They are **busy public downtown stops that reveal nothing** — the opposite of the stop this sign actually points at, which must never appear in a tracked file or a committed image.
-- They are genuinely **two stops on one board**, which is exactly the case the layout has to solve. A single-stop sample would hide the problem.
-
-Real routes there: northbound `H Line, 5, 17, 21, 24, 27, 28, 33, 40, 56, 57, 62, 124, 131, 132, 570`; southbound `1, 2, 3, 4, 7, 13, 14, 17, 36, 40, 62, 70, 570`. Use real route numbers and headsigns in mockups — invented ones hide width problems, and `570` / `131` are wider than the `40` that earlier renders were tuned against.
-
-#### Two stops on one board — the layout, variant 9
-
-`assets/sources/design-variants/variant-9-two-stops.png`. The groups are separated by a **light grey band** holding the direction, the stop name and the stop code. Four departures per direction, accepted 2026-08-01 after comparing against three — three left a visible dead band above the footer rule, and four fills the panel without the rows reading as cramped. The band is our invention — Metro's signs serve one stop, so they have no equivalent.
-
-**The stop name lives in the band, on every group, always — revised 2026-08-01.** It was in the footer once, which assumed a board is one street in both directions. That assumption does not hold: the two stops may be blocks apart and chosen independently, and even a true across-the-street pair can carry different names when the cross streets differ. So each band names its own stop, and a board whose groups happen to name the same one says it twice. The repetition is the point — the band is the single place a reader ever looks for the stop, rather than a place the name moves to depending on data the reader cannot see. The footer is now the "Updated at" stamp alone.
-
-Direction and name share one baseline through a `<tspan dx>` rather than a second `<text>` at a fixed x, because the name has to begin wherever the direction ends and text width is not knowable in `render/board.js` — the font is only loaded in `render/index.js`. **Spaces do not work for the gap**: SVG collapses runs of whitespace, so `"St   Stop No."` renders as `"St Stop No."` and the two read as one phrase. Verified by looking at the render, not by trusting a 200.
-
-**Row height is derived, not a constant — added 2026-08-01 when four rows landed.** `rowMetrics()` in `render/board.js` divides the space between the header and the footer rule by however many departures the board carries, and every size inside a row scales by that one factor. Three things about it are deliberate:
-
-- **It clamps to a 158px ceiling rather than stretching to fill.** A sparse board — one direction, or a stop with two departures left in the day — would otherwise stretch its rows across the whole panel. The accepted eight-row board comes in at 128 and is genuinely scaled; a two-row board hits the ceiling and is not.
-- **Horizontal metrics never scale.** Width is not the constraint, and holding the 152px badge slot fixed is what keeps the destination column in the same place across bus, rail, and any density.
-- **The clamp reserves a 12px gutter above the footer rule.** Without it the densest board that fits lands its bottom edge exactly on the rule and `pm` descenders come within a few pixels of crossing — fitting by arithmetic coincidence, and a later pixel shaved off the header would push them through with every test still passing.
-
-Row count still is **not** configuration. It follows from how many departures the data has, bounded by what fits.
-
-**Direction wording — decided 2026-08-01. Spell the bearing out, and allow a per-stop override.**
-
-OneBusAway reports a compass bearing (`N`, `NE`, `NW`, …), never a word. The default is to spell it out and append "bound": `N` → **"Northbound"**, `NW` → **"Northwest bound"**. That is correct for every stop in the county with no lookup table, which is the property that matters — the sign has to work for a stop nobody has configured.
-
-**The four cardinals close up; the diagonals stay spaced.** Revised 2026-08-01, after the first pass emitted "North bound" for every cardinal. "Northbound" is the word, and it is what Metro prints, while "Northwestbound" is not a word anyone writes. This is a spelling rule, not a semantic one, and the payoff is that a plain north-south stop needs **no override at all** — which is what an override map should look like. `COMPASS_WORDS` in `render/board.js` now holds the full label per bearing rather than a stem plus a suffix.
-
-A small `DIRECTION_OVERRIDES` map, keyed by full OBA stop ID, replaces the label where the **bearing itself misleads** — 3rd Ave runs diagonally, so its stops report `NW`/`SE` while every rider and every Metro timetable says northbound (`1_600` → "Northbound"). Intended for a handful of personal stops. **Never a county-wide table** — that would defeat the point of deriving it.
-
-The deployment's map lives with the secrets, never in `[vars]`; the sample boards carry their own public one in `src/dev/sample-boards.js`. See `docs/deploying.md`.
-
-Collapsing `NW` to "Northbound" was considered and rejected: whether north or west dominates depends on the street's orientation, which the API does not give us, so it would be confidently wrong on some stops. Being verbose and right beats being idiomatic and sometimes wrong.
-
-#### The layout follows Metro's real Connectpoint sign — variant 8 is the reference
-
-Decided 2026-08-01 against photographs of the real signs, kept in `assets/sources/connectpoint-photos/`. The `connectpoint-0407pm-blog.jpg` photo is the clearest and is the one being matched; `assets/sources/design-variants/variant-8-metro-blog.png` is our render of it.
-
-**Kept from the official sign:**
-
-- Black header bar: reversed King County Metro logo, then **Departures**, then the day and date stacked small, then the clock with a smaller heavier meridiem.
-- **Route badge** as a filled rounded rect with a white numeral, destination in bold beside it.
-- **The right column stacks three lines**: `Scheduled` (only when it applies) over the value over the unit. This is Metro's own answer to the real-time question and it is better than any pill or colour treatment — it needs no legend and costs no contrast.
-- **Format follows time distance, not data source**: `Now` for imminent, minutes for near, clock time for far. A scheduled departure two minutes out still shows "2 min" on the real sign.
-- Thin rules between rows, footer rule, stop number and cross-streets in the footer.
-- **Small text is set heavier than the numerals.** `min`, `pm` and the meridiem all carry more weight than their size suggests, which is what keeps them legible at distance.
-
-**Deliberately not kept:**
-
-- **`connectpoint` branding.** It was replaced by the OneBusAway mark for a while; the footer now credits nobody. See the asset note below — the mark is still in source, just not drawn.
-- **Their two-column grid**, which is a 16:9 strip showing four departures with no destinations. We are 4:3 with room for eight rows *and* destinations.
-- **The comma after the weekday.**
-- **Their service-alert block.** Not needed now; see the TODO.
-
-**Added because our sign can fail in ways theirs cannot:**
-
-- **The "Updated at" stamp**, bottom left, starting at the left margin now that no logo sits beside it. Metro's signs are wired, monitored and replaced when broken. Ours can freeze silently, so this is the only thing that makes a stale panel self-evident. The wording is deliberate: "Updated at 4:22 pm" states what happened, where the earlier "as of 4:22 pm" read as a hedge.
-- The stacked **day and date** in the header does double duty here — it is Metro's, but for us it is also the cue that catches a panel frozen since yesterday.
-
-**Asset notes.** The reversed (white) Metro logo comes from `cdn.kingcounty.gov/-/media/king-county/depts/metro/logo-art/metro/metro-logo-reversed-200x75` and is embedded as a base64 PNG in an `<image>` element. Brand rules are at `projects.seattletransitmap.com/library/King County Metro/Graphic Standards/7.0.2-p-Logo.pdf` — note that the Verdana it specifies applies to stationery address blocks, **not** to the signage face.
-
-**The OneBusAway mark is no longer drawn, decided 2026-08-01.** The footer is now just the "Updated at" stamp and the stop name, and the stamp starts at the left margin instead of clearing a logo. `obaMark()` and the pre-cleaned assets stay in `src/render/board.js` and `src/assets/` — putting the mark back is a one-line change, and the notes below are why re-deriving it would not be. Keep them.
-
-**The OneBusAway mark needs three fixes, not one.** Draw the backing plate ourselves rather than using the artwork's: the source plate is square while the vehicles inside it are far wider than tall, so a square wastes height and crowds the sides. Use `assets/sources/one-bus-away-logos/onebusaway-vehicles-only.svg`, size the plate to the artwork's ~566:348 ratio, and pad the sides more than the top and bottom.
-
-Recolouring needs a **two-step swap through a sentinel**. The bodies are `#000000` and the windows `#ffffff`; replacing black→white and then white→dark runs the first result through the second and flattens both to one colour. Bodies must end white and windows dark, or the windows dissolve into the body.
-
-**The OneBusAway mark must be recoloured for greyscale.** Its brand green quantizes to a mid grey and the vehicles on it are black, which collapses into a smudge at footer size. Swap the square to black and the vehicles to white — same silhouette, full contrast. The source SVGs are Inkscape files; stripping the outer `<svg>` to re-frame them also strips the namespace declarations, and resvg rejects the whole document over an undeclared `inkscape:` prefix rather than ignoring it, so those attributes have to be removed too.
-
-**Typeface: Fira Sans**, chosen 2026-08-01. The real sign's face is a Connectpoint choice and is not in Metro's brand standards, but its **open-top `4`** places it in the humanist-signage family that Frutiger and Myriad belong to. Both are commercial; of six open candidates compared at native resolution against the blog photo, **Fira Sans is the only one that opens the 4** — Inter, Source Sans 3, Public Sans, Archivo and Mulish all close it.
-
-Judge glyph shapes at a large size. An earlier pass called Source Sans 3 open from a row-sized specimen and was wrong; the aperture is a few pixels at 76px. `variant-10-fonts` now sets a 150px `4` for exactly this reason.
-
-#### Real-time vs scheduled — the per-row treatment, decided 2026-08-01
-
-Five variants were rendered at native 1872x1404 and compared as images rather than described. All are kept in `assets/sources/design-variants/variant-*.png`. The script that generated them is gone — they are a record of what was tried, not a reproducible build; the design has lived in `src/` since 2026-08-01 and re-renders from `/_preview`.
-
-**Variant E wins: no greying anywhere. A hollow route badge marks scheduled, plus an outlined `SCHED` pill.**
-
-- **Live rows:** filled black badge, white numeral.
-- **Scheduled rows:** outlined badge, black numeral on white, and a `SCHED` pill before the time.
-- **Everything else stays full black on every row** — destination, time, all of it.
-
-The filled-vs-hollow badge is a **shape and weight** difference rather than a tonal one, which is why it survives distance: at a glance the eye picks out solid black blocks versus outlines without reading anything. The pill confirms it up close.
-
-**Why the greying variants lost, which is the part worth remembering.** Greying a scheduled row dims the one thing the reader came for. A scheduled 4:31 is not an error and not stale — it is the best available answer for that bus, and it should be as legible as any other. Variants A, B and C all degraded real information in order to signal uncertainty about it. Variant D was the halfway house (grey the badge and destination, keep the time black) and read as though the row had failed to render rather than as a deliberate signal.
-
-Also rejected: labelling every row `LIVE`/`SCHED` (variant B) spends ink and horizontal space on the majority case to restate what the badge already says, and stacking a `SCHEDULED` word above the time (variant A) crowded the numerals at native resolution.
-
-**A consequence worth keeping: grey now carries no meaning in the row area at all.** It is only de-emphasis — the footer, the `min`/`pm` units. That removes the conflict the greying variants would have created, where the same tone had to mean both "unverified" and "less important". Two distinct greys are defined in the spike for this reason: a mid grey for anything meaningful, a light grey for de-emphasis. With E, only the light one is used.
-
-#### The format ladder — thresholds read off the real signs, 2026-08-01
-
-`Now` under a minute, `N min` through **10**, clock time from **11**. In `src/oba/format.js`, and nowhere else — the mapper emits a `departsAtMs` and a `live` flag, so revisiting the ladder is a change to that one file.
-
-The numbers were **measured, not chosen.** Every photograph in `assets/sources/connectpoint-photos/` carries the current time in its header, which makes every row a data point:
-
-| Photo | Header | Largest `N min` | Smallest clock time |
-| --- | --- | --- | --- |
-| `connectpoint-0652am` | 6:52 am | **9 min** | — |
-| `connectpoint-0411pm` | 4:11 pm | 8 min | — |
-| `connectpoint-0650am` | 6:50 am | 8 min | 7:03 am (13 min) |
-| *(not kept)* | 3:51 pm | 7 min | 4:03 pm (12 min) |
-| *(not kept)* | 5:03 pm | 2 min | 5:14 pm (**11 min**) |
-| `connectpoint-0407pm-blog` | 4:07 pm | 4 min | 4:26 pm (19 min) |
-| `connectpoint-0250pm-rapidride` | 2:50 pm | 5 min | 3:10 pm (20 min) |
-
-**Two of those photos are no longer in `assets/sources/connectpoint-photos/`**, including the 5:03 pm one that supplies the `11 min` observation — the single row that fixes the top of the ladder. The readings were taken when the photos were present and are kept here because this table *is* the record; they are simply no longer re-checkable from the repo. Do not treat their absence as a reason to re-derive the thresholds, and do not delete the rows to tidy the table.
-
-So Metro counts minutes to at least 9 and is showing clock times by 11; 10 was the owner's call on the one boundary the photos do not settle. **Do not re-derive this from an assumption** — the first guess in this project was 20, and the photos disprove it.
-
-Two more things the same photographs settle, both free:
-
-- **`Scheduled` rows use the identical ladder.** `Scheduled 2 min`, `Scheduled 4 min` and `Scheduled 8 min` all appear on real signs. Whether a prediction is live changes the label above the time and never the format of the time.
-- **A departure slightly in the past is `Now`, not gone.** `NOW_GRACE_MS` is 60 seconds. The first departure in every captured fixture is a bus already at the kerb with a prediction a minute old; dropping those would blank the most useful row on the board exactly when it matters.
-
-Minutes are **floored**, not rounded: understating the wait sends someone to the kerb early, and overstating it lets them watch the bus leave.
-
-#### A stop that answers and a stop that does not — 2026-08-01
-
-Two stops fail independently, so half a board failing is the ordinary shape of an outage rather than a rare one.
-
-- **One stop answering is enough for a board.** The failed group keeps its band and says `Departure data unavailable` where its rows would be. Only when *every* stop fails does the sign drop to the full-panel `obafail` notice.
-- **A stop with no service left is a different sentence** — `No more departures today` — and stays a board, tagged `noservc`. "We could not ask" is a fault and "nothing is coming" is an answer, and a reader has to be able to tell them apart.
-- **An empty group keeps its full share of the panel.** `reserved` on the group, honoured by `rowMetrics()`. Without it the surviving direction's rows grow to fill the gap, and a partial failure renders as a different design rather than as a missing half. The message is centred in that space, large: left-aligned at row size it was tried first and read as a caption someone forgot to finish.
-- **Row count comes from `maxRowsPerGroup()` in `render/board.js`**, which divides the panel by a legibility floor. Two stops get four each, which is the density the design was accepted at; a single-direction sign gets more, because it pays for one band instead of two and a gap. This is how row count stays derived rather than configured.
+**Two rules from it apply everywhere and stay here.** Mockups use the downtown Seattle sample stops, **never the stop this sign actually points at** — do not name that stop, its cross-streets, its routes, or its neighborhood in any tracked file, and never commit a render of it. And use real route numbers and headsigns in mockups; invented ones hide width problems.
 
 #### The refresh schedule and the overnight rest screen — decided 2026-08-01
 
@@ -602,67 +440,9 @@ So:
 
 **Do not port a KV rate limiter.** KV's free write quota is 1000 a day and this sign alone polls ~1440 times a day, so per-request bookkeeping would exhaust it on legitimate traffic before an attacker existed. Enforcement is deliberately absent; observation is the whole mechanism.
 
-### The stats page
+### The stats page — see `src/stats/CLAUDE.md`
 
-`/stats`, HTTP Basic on `STATS_PASSWORD`, matched **before** the token gate because it carries no path secret and would otherwise 404 as an unshaped path. Backed by Analytics Engine: free on the Workers Free plan at 100k writes and 10k read queries a day, written through a Worker binding and read through an HTTP SQL API that needs `CLOUDFLARE_ACCOUNT_ID` and a token scoped to Account Analytics read. **Expected volume is ~3-5k data points a day against that 100k** — there is no quota question, stated so nobody re-derives one.
-
-**Blob and double positions in `src/stats/schema.js` are permanent.** Analytics Engine rows are positional arrays with no schema, so inserting a field mid-list silently reinterprets every historical row, with no migration and no way to detect it afterwards. **Append only.** Queries reference columns through `blobColumn()` rather than writing `blob14`, so appending cannot shift a query onto the wrong column. `src/stats/schema.test.js` pins the order by absolute position — never as "the last one", which would silently follow a column that moved.
-
-#### Twenty blobs and twenty doubles, and the row is rejected whole past that
-
-**Analytics Engine's per-row ceiling is 20 blobs and 20 doubles.** It is a fixed number of slots, not a schema that grows with what you write — `SELECT * LIMIT 1` returns `double1` through `double20` on a dataset that has only ever been written 10 doubles. A row handed more than 20 of either is **dropped entirely**, not truncated to the first 20.
-
-**This cost a full day of data on 2026-08-02.** Seven device columns and `upstreamReason` were appended to a request schema already at 20, taking it to 28. From that deploy until the split below, **every** write was rejected: no request outcomes, no rejections, no scanner traffic. Nothing surfaced it — `recordRequest()` swallowed the error, `/stats` rendered a reassuring "that is the expected state" banner over an empty dataset, and 739 tests stayed green. The only visible symptom was two panels reporting `unknown column: "blob21"`, which reads like a bad query rather than like a dataset that has stopped accepting rows.
-
-Three things now guard it, and the order matters because the first two are not what you would expect:
-
-- **`assertWithinLimits()` throws at module load** in every file defining a dataset schema. It cannot be swallowed by a write path's catch.
-- **`npm test` is what catches that throw. `wrangler deploy --dry-run` is not** — verified by pushing the list to 21 on purpose: the dry-run bundles without executing top-level code and reports a clean upload, while eight test files fail. So `npm run deploy` runs the suite first, and that gate is load-bearing rather than belt and braces.
-- **Failed writes are logged** rather than silently swallowed. The original reasoning — that a rejected write "shows up as a suspiciously empty `/stats` page" — was exactly backwards, since an empty page is also what a Worker nothing has found looks like.
-
-The cost of the throw is worth knowing: if an over-long schema ever did ship, module evaluation fails and **every request 500s**, so the sign goes dark rather than merely losing analytics. That is the intended trade — a dead Worker is found in minutes, a silently rejected dataset was not found for a day — but it is why the deploy gate matters.
-
-#### Device telemetry is its own dataset
-
-`src/stats/device-telemetry.js`, dataset `trmnl_orca_departures_devices`, binding `DEVICE_TELEMETRY`. Added 2026-08-02 to fix the overflow above, and right on its own terms: these columns describe a **device**, not a request, and most rows in the requests dataset are scanner traffic where every one of them is empty.
-
-**`deviceId` is the MAC address, from the `ID` header, and it is the only stable per-device key.** Everything else the firmware sends describes a *kind* of device — model, geometry, firmware build — so without it two identical signs are indistinguishable, which is exactly the case the identity alarms exist to catch. **There is no serial number**; the firmware sends none, so the MAC stands in for one.
-
-- **One row per authenticated device request**, written from the same `recordOutcome()` closure in `src/gate.js` as the request row, so the two cannot drift apart.
-- **Gated on `identifiesADevice()`** — an `ID` or `Model` header, either alone. The setup-logo download sends no headers at all, and a row for it would be eighteen empty columns claiming a device reported nothing.
-- **`upstreamReason` lives here**, not on the request row. An upstream failure only ever happens on a device poll.
-- **The request schema was cut back to its original 20**, which is a deletion of slots with *no history behind them* rather than the reorder the append-only rule forbids: `blob21`+ were never successfully written, so nothing was reinterpreted. `clientIp` went with them, so it is now recorded on device rows only.
-- The panels reading device facts — firmware, panel health, refresh echo, battery, Devices, upstream failures — all query this dataset. That is what stops the owner's own `curl` from rendering as a device.
-- **`BLOB_FIELDS` is now deliberately wider than what `query.js` reads.** `imageCached`, `updateSource`, `wakeTime`, `batteryCapacity` and all ten doubles lost their reader in the move; `route` and `httpProtocol` never had one. They keep their slots and keep being written, because a write that stops announces nothing — a later query would silently span a boundary where the column just goes blank. `model` and `firmwareVersion` are still read here, by the enrollment breakdown, since `/api/setup` is a request and sends both.
-- **`identity.networks` still reads the requests dataset, filtered to authenticated**, and that is the one device-shaped panel that deliberately did not move. The leaked-token alarm has to catch an authenticated caller *without* device headers, which is exactly what a stolen URL looks like. A consequence: on an unpaired sign that row can name a network from the owner's own `curl` while the row above it says no device has polled. Odd-looking and correct.
-
-#### "No device has polled" is a state, not an empty panel
-
-Every check in the Device identity panel is a comparison against what a paired sign looks like, and none of them means anything before one exists. Two hand-made `curl` calls were enough to make `/stats` report an "unknown" firmware build on a panel of `-1 x -1` and a poll volume of "2 vs ~12,614 expected", every line labelled `ok` — three sentences describing a device in trouble, with no device. `identity.deviceCount` drives an explicit **Paired device** row saying so once, and the expected poll count is withheld until there is something to compare it against. Guarded on the query error too, because a failed query returns zero rows and "no device has polled" is a claim, not a default.
-
-`buildUnpairedMockStatsData()` renders that state at **`/_preview/stats?unpaired`**. It is what the owner looks at for the whole gap between deploying and pairing, and nobody had looked at it.
-
-**No panel may print reassurance beside its own error.** "Every stop answered on every poll" under a 422 is the page describing data it failed to read, and the sentence is the part a reader believes. `emptyState()` in `render.js` withholds an empty-state line whenever that panel's query failed. The rule was written down once, for the device-logs panel, and applied to none of the five others that needed it.
-
-**Copy describing what the Worker does not do yet becomes a lie the day someone implements it.** The device-logs panel claimed `/api/log` was unimplemented for a day after it landed, which would have read a real outage as expected state. `render.test.js` now pins the endpoint being described as working.
-
-The per-device panels are the only place two devices are ever separated. They group raw recent rows in JS rather than with a `GROUP BY`: *latest* is the question, and the aggregate a group-by can give — an average voltage — is not what a device box is asking for.
-
-**`upstreamReason` records why OneBusAway did not answer, including on partial failures.** One stop answering is enough for a board, so a degrading quota never reaches `obafail` and would be invisible until it was total. The HTTP status is folded into the slug — `http-429`, not `http-status` — because the status is the whole content of that reason. It is deliberately **not** part of the `filename`: two outages that look identical on the glass must not repaint the panel.
-
-**`clientIp` is recorded, which extends the screenshot warning.** A `/stats` screenshot now carries an IP as well as roughly a home address. Same reasoning as the geo and network columns: on a single-device sign the address is a constant, and a constant is what makes a deviation legible if the URL token ever leaks.
-
-**Compare filters against the `OUTCOMES` constants, never a retyped string.** The enrollment alarm was dead from the day it was written because `query.js` matched `'setup'` while the recorded value has always been `'byos-setup'`. `render.js` already states this rule for its label maps; that bug is what breaking it costs, and nothing in the test suite would have caught it.
-
-**Geo and network are recorded on authenticated requests too, and that is deliberate.** The instinct to strip them is wrong: on a single-device sign the network is a constant, and that is exactly what makes a deviation legible. If the URL token ever leaks, the attacker authenticates *successfully*, and a change of network is the only signal that would ever exist. Cloudflare's own request logs hold the client IP regardless, so omitting it would deny the owner the one view where a compromise is visible without denying anyone else anything. The Device identity panel is built for this and is designed so the normal state is one calm line.
-
-**Stop IDs are recorded raw, by the owner's explicit decision**, because "which stop was this failing request for" is what the page is for. This does not breach the privacy rule, which is about tracked files — the stop still never enters git. The residual risk is narrower and named on the page itself: a screenshot of `/stats` carries roughly a home address.
-
-**The token is never recorded**, only a 4-byte fingerprint, which distinguishes forty attempts at one wrong token from forty different guesses. Raw paths are never recorded either, except for unauthenticated requests, which go through `safeProbePath()` — an **allow-list** that keeps short ordinary segments and replaces anything long or high-entropy with `[redacted]`. Written as an allow-list on purpose: a deny-list of "things that look like a token" would fail the moment the token format changed, and a near-miss URL such as `/toke/<real token>/…` would otherwise write the live secret straight into the dataset.
-
-**Device logs are kept as history, not only streamed.** `/api/log` entries go to a second Analytics Engine dataset via `recordDeviceLogs()` in `src/stats/device-logs.js`, and are read back by the Device logs panel. `console.log` and `wrangler tail` are kept alongside it for watching a device you are standing next to, but they are not a substitute: the entries that matter arrive during a failure, which is exactly when nobody is watching a tail, and `[observability.logs]` retention is a few days in a separate store that cannot be joined against the request rows explaining what the device was reacting to. `sourcePath` plus `sourceLine` are the pair that earns the whole dataset — together they name the exact line of firmware that failed. Its columns are positional and append-only for the same reason the request schema's are.
-
-`src/stats/render.js` is pure and takes a plain data object, so the page is unit-testable with no Analytics Engine mock. **It must escape everything** — it renders attacker-controlled user agents and paths. `src/dev/preview.js` builds HTML without escaping because its inputs are fixtures; that is not a precedent this page can follow.
+`/stats`, HTTP Basic on `STATS_PASSWORD`, matched **before** the token gate because it carries no path secret and would otherwise 404 as an unshaped path. Everything else — the positional, append-only Analytics Engine schema, the 20-blob/20-double per-row ceiling that cost a day of data, the separate device-telemetry dataset, and the "no device has polled" state — is in `src/stats/CLAUDE.md`, which loads automatically when working under that directory.
 
 ### Pointing the device at this Worker
 
@@ -751,9 +531,3 @@ Neither is a workaround for a deliberate restriction — they are cache/log loca
 
 **`npx wrangler ...` is also denied.** Add the subcommand to `package.json` scripts and call it through `npm run` instead. That is why `dev`, `deploy`, `test` and `lint` all exist as scripts.
 
-
-## Notes on this environment
-
-`npm install` may need its cache redirected on sandboxed setups: `export npm_config_cache="$PWD/.npm-cache"`.
-
-`wrangler dev` may need `XDG_CONFIG_HOME` and `WRANGLER_LOG_PATH` redirected too; that leaves a disposable `.wrangler-home/` in the repo.

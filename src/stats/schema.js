@@ -247,8 +247,8 @@ const MAX_PROBE_SEGMENTS = 4;
  * Knowing that bots probe `/wp-login.php` and `/.env` is genuinely useful and costs nothing, but the
  * naive version of this field is a serious leak: a URL one character away from ours — `/toke/<real
  * token>/...` — fails the token check, lands in the unshaped bucket, and would write the live shared
- * secret straight into the analytics dataset. That is precisely the trap `CLAUDE.md` warns about,
- * where the secret ends up in the place people paste when debugging.
+ * secret straight into the analytics dataset. That is precisely the trap `src/stats/CLAUDE.md`
+ * warns about, where the secret ends up in the place people paste when debugging.
  *
  * So this is an allow-list, not a deny-list. A segment is recorded only if it looks like an ordinary
  * short path word; anything long or high-entropy — which is every secret and no real probe path —

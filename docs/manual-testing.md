@@ -17,7 +17,7 @@ export STOPS='<stopId>[,<stopId>]'             # one or two, bare IDs, no agency
 export BASE="$ORIGIN/token/$DEVICE_TOKEN/agency/$AGENCY/stop/$STOPS"
 ```
 
-To avoid typing a real stop, the public downtown samples work against any deployment: `AGENCY=1` with `STOPS=600,430` is 3rd Ave & Virginia St / 3rd Ave & Pine St. See the sample-stop table in `CLAUDE.md` for the rest, including the light-rail pair.
+To avoid typing a real stop, the public downtown samples work against any deployment: `AGENCY=1` with `STOPS=600,430` is 3rd Ave & Virginia St / 3rd Ave & Pine St. See the sample-stop table in `src/render/CLAUDE.md` for the rest, including the light-rail pair.
 
 Rather than exporting the token into your shell, you can source `.dev.vars` for a single command:
 

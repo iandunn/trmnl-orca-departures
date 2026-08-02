@@ -1271,8 +1271,8 @@ export function renderStatsHtml( data ) {
  *
  * Two things are deliberate rather than incidental. **Every timestamp is a fixed literal** — a
  * `Date.now()` here would make any test that renders the mock non-deterministic. And **the stop IDs
- * are the downtown Seattle samples** from `CLAUDE.md`, never the stop this sign points at, because
- * this is a tracked file.
+ * are the downtown Seattle samples** from `src/render/CLAUDE.md`, never the stop this sign points
+ * at, because this is a tracked file.
  *
  * The dataset is chosen to exercise the page's hard cases at once: a second network and a non-zero
  * enrollment count so both alarms are visible, a battery bucket with no charge reading so the
@@ -1486,7 +1486,7 @@ export function buildMockStatsData( rangeKey ) {
 
 		badRequests: {
 			rows: [
-				// Downtown Seattle samples, per `CLAUDE.md`. Never the stop this sign points at.
+				// Downtown Seattle samples, per `src/render/CLAUDE.md`. Never the stop this sign points at.
 				{ reason: REJECTION_REASONS.invalidStopId, agency: '1', stopIds: '590,43O', count: 2, lastSeen: '2026-07-30 07:02:11' },
 				{ reason: REJECTION_REASONS.tooManyStops, agency: '40', stopIds: '621,623,1121', count: 1, lastSeen: '2026-07-29 18:20:44' },
 			],

@@ -23,7 +23,8 @@
  *
  * The two "not kept" photos are no longer in the folder, including the 5:03 pm one carrying the
  * 11 min reading that fixes the top of the ladder. The readings were taken while they were, and
- * `CLAUDE.md` holds the same table — their absence is not a reason to re-derive the thresholds.
+ * `src/render/CLAUDE.md` holds the same table — their absence is not a reason to re-derive the
+ * thresholds.
  *
  * So the real sign counts minutes up to at least 9 and is showing clock times by 11. The owner's
  * call resolved the unobserved boundary: **10 counts, 11 does not.**
