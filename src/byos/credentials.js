@@ -3,8 +3,8 @@
  *
  * Terminus persists a random key per device. We have no storage at all yet, and deliberately so —
  * the one genuinely stateful piece in the design (the recovery generation) is still an open question
- * in `docs/TODO.md`, and enrollment should not be what forces that decision. Deriving both values
- * from the shared secret keeps this piece stateless.
+ * in `docs/todo-someday.md`, and enrollment should not be what forces that decision. Deriving
+ * both values from the shared secret keeps this piece stateless.
  *
  * **This grants no access that the caller did not already have.** The path token is the real gate,
  * and anyone who can reach `/api/setup` already holds it, because it is a segment of the URL they

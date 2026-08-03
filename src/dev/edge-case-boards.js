@@ -273,10 +273,9 @@ function halfFailedBoard( time ) {
  * "no more buses today" is information: the reader learns not to wait, which a "sign broken" screen
  * would not tell them.
  *
- * **Each group also lists tomorrow's first departures**, which is the other half of what someone at
- * this stop at midnight needs. **Those times are placeholders**, on the same footing as the names
- * around them: nothing produces them yet, because first trips need OneBusAway's `schedule-for-stop`
- * rather than the arrivals call this project makes. See `docs/TODO.md`.
+ * Each group also listed tomorrow's first departures until 2026-08-02, from placeholder times, since
+ * first trips need OneBusAway's `schedule-for-stop` rather than the arrivals call this project makes.
+ * Removed with the rendering; see `docs/todo-someday.md`.
  */
 function noServiceBoard( time ) {
 	return {
@@ -291,10 +290,6 @@ function noServiceBoard( time ) {
 				rows: [],
 				reserved: 4,
 				message: 'No more departures today',
-				tomorrow: [
-					{ badge: 'D Line', to: 'Ballard Uptown', value: '4:58', unit: 'am', live: false },
-					{ badge: '5', to: 'Shoreline Greenwood', value: '5:12', unit: 'am', live: false },
-				],
 			},
 			{
 				heading: 'Southbound',
@@ -303,10 +298,6 @@ function noServiceBoard( time ) {
 				rows: [],
 				reserved: 4,
 				message: 'No more departures today',
-				tomorrow: [
-					{ badge: '7', to: 'Rainier Beach Via Rainier Ave S', value: '5:04', unit: 'am', live: false },
-					{ badge: '36', to: 'Othello Station N Beacon Hill', value: '5:21', unit: 'am', live: false },
-				],
 			},
 		],
 	};

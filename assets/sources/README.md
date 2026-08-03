@@ -31,6 +31,15 @@ The Metro lockup in both polarities, as raster and vector.
 
 The brand standards PDF is **not** kept here. One thing from it worth remembering: the Verdana it specifies applies to stationery address blocks, **not** to the signage face — the face on the real signs is a Connectpoint choice and is still unidentified.
 
+## `sound-transit/`
+
+The official horizontal lockup, as published — `web-brand-logo-horizontal-rgb-png.zip` from `soundtransit.org/get-to-know-us/our-brand/logos`, unpacked and with the archive's `__MACOSX` junk dropped.
+
+- `web-st-logo-horizontal-white-rgb.png` — the reversed artwork the rail header actually draws, via `src/assets/sound-transit-logo.js`. Their guidelines specify white on a dark field, which is what the header bar is.
+- `web-st-logo-horizontal-black-rgb.png` and `-blue-rgb.png` — the positive versions, for a light design. Blue is `Dark Wave`, their brand colour, and quantizes to a mid grey on this panel, so black is the one to reach for.
+
+All three are 1218x185 RGBA with no padding around the artwork. The vertical lockup and the EPS versions were not kept; a horizontal bar wants the horizontal logo, which is their own stated preference. There is **no official Link service logo** on that page — the tram-in-a-rounded-square from `connectpoint-photos/link-signpost.png` is the only reference for it, which is what `tramGlyph()` was drawn from.
+
 ## `one-bus-away-logos/`
 
 OneBusAway's logo, all four as published.

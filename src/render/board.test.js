@@ -9,6 +9,8 @@ import {
 	rowMetrics,
 } from './board.js';
 import { BUS_BOARD, RAIL_BOARD } from '../dev/sample-boards.js';
+import { METRO_LOGO_DATA_URI } from '../assets/metro-logo.js';
+import { SOUND_TRANSIT_LOGO_DATA_URI } from '../assets/sound-transit-logo.js';
 import { collapseRepeatedPhrases } from '../headsign.js';
 
 describe( 'directionLabel', () => {
@@ -83,7 +85,7 @@ describe( 'rowMetrics', () => {
 } );
 
 describe( 'a group whose last bus has gone', () => {
-	const spent = ( tomorrow ) => ( {
+	const spent = () => ( {
 		...BUS_BOARD,
 		groups: [
 			{
@@ -91,31 +93,14 @@ describe( 'a group whose last bus has gone', () => {
 				rows: [],
 				reserved: 4,
 				message: 'No more departures today',
-				...( tomorrow ? { tomorrow } : {} ),
 			},
 		],
 	} );
 
-	it( 'says so, and says nothing else when tomorrow is unknown', () => {
+	it( 'says so, in place of its rows', () => {
 		const svg = buildBoardSvg( spent() );
 
 		expect( svg ).toContain( 'No more departures today' );
-		expect( svg ).not.toContain( 'Tomorrow' );
-	} );
-
-	// Both facts, not one: "nothing more today" and "here is the first one" are different answers, and
-	// someone reading this at midnight wants both.
-	it( 'lists tomorrow’s first departures under the sentence when they are known', () => {
-		const svg = buildBoardSvg(
-			spent( [ { badge: '5', to: 'Shoreline Greenwood', value: '5:12', unit: 'am', live: false } ] )
-		);
-
-		expect( svg ).toContain( 'No more departures today' );
-		expect( svg ).toContain( 'Shoreline Greenwood' );
-		expect( svg ).toContain( '5:12' );
-		// In the slot a scheduled row uses for `Scheduled` — the word that stops the number below it
-		// being read as the next bus.
-		expect( svg ).toContain( 'Tomorrow' );
 	} );
 } );
 
@@ -317,11 +302,36 @@ describe( 'buildBoardSvg', () => {
 			expect( buildBoardSvg( BUS_BOARD ) ).toContain( 'data:image/png;base64,' );
 		} );
 
-		it( 'names Sound Transit on a rail board, since they operate Link', () => {
+		it( 'draws the Sound Transit logo on a rail board they operate', () => {
 			const svg = buildBoardSvg( RAIL_BOARD );
 
-			expect( svg ).toContain( 'SOUND TRANSIT' );
-			expect( svg ).toContain( 'LINK LIGHT RAIL' );
+			expect( svg ).toContain( SOUND_TRANSIT_LOGO_DATA_URI );
+			expect( svg ).not.toContain( 'SOUND TRANSIT' );
+		} );
+
+		// A logo claims who runs the service, and `boardMode()` only knows that every route is rail —
+		// which the streetcar and the monorail also are. An agency we hold no artwork for gets its name.
+		it( 'names an agency it has no logo for, rather than borrowing one', () => {
+			const svg = buildBoardSvg( { ...RAIL_BOARD, agency: 'CITY OF SEATTLE' } );
+
+			expect( svg ).toContain( 'CITY OF SEATTLE' );
+			expect( svg ).not.toContain( SOUND_TRANSIT_LOGO_DATA_URI );
+			expect( svg ).not.toContain( METRO_LOGO_DATA_URI );
+		} );
+
+		// `COMMUNITY TRANSIT` measures 452px at the lockup's size, rendered and read off the image on
+		// 2026-08-02 — so `Departures` has to start past 508 to clear it. The floor is that measurement
+		// rather than the estimate that positions the word, which is the only way this catches the
+		// estimate drifting: at 0.5 per character the two overlapped and nothing failed.
+		it( 'moves Departures clear of a long agency name', () => {
+			const departuresX = ( agency ) =>
+				Number(
+					buildBoardSvg( { ...RAIL_BOARD, agency } )
+						.match( /<text x="(\d+)"[^>]*>Departures</ )?.[ 1 ]
+				);
+
+			expect( departuresX( 'COMMUNITY TRANSIT' ) ).toBeGreaterThan( 508 );
+			expect( departuresX( 'COMMUNITY TRANSIT' ) ).toBeGreaterThan( departuresX( 'CITY OF SEATTLE' ) );
 		} );
 	} );
 

@@ -104,7 +104,21 @@ Decided 2026-08-01 against photographs of the real signs, kept in `assets/source
 - **The "Updated at" stamp**, bottom left, starting at the left margin now that no logo sits beside it. Metro's signs are wired, monitored and replaced when broken. Ours can freeze silently, so this is the only thing that makes a stale panel self-evident. The wording is deliberate: "Updated at 4:22 pm" states what happened, where the earlier "as of 4:22 pm" read as a hedge.
 - The stacked **day and date** in the header does double duty here — it is Metro's, but for us it is also the cue that catches a panel frozen since yesterday.
 
+## The rail header is Sound Transit's own logo — 2026-08-02
+
+**A rail board draws the official reversed lockup where a bus board draws Metro's, and neither says its mode.** It used to set the agency name and `LINK LIGHT RAIL` as two lines of type. The word was a stand-in for artwork we did not have; now we have it, and the bus board was already logo-plus-`Departures` and nothing else.
+
+**Sized by cap height, not by block height.** Their horizontal lockup is 6.58:1 against Metro's 2.67:1 — one line of type against two — so matching Metro's 62px block would set the wordmark half again as tall as `Departures` and let the operator shout over the word the sign is for. At 46px tall the two wordmarks read at the same size, which is what the headers were compared side by side to settle.
+
+**One deliberate divergence from their standards**, and only one: clear space is specified as the height of the `S` in the mark, which a 102px header bar cannot give above and below at any usable size. Everything else is followed — their own white artwork on a dark field, unaltered proportions, symbol and typography never separated.
+
+**The logo is gated on the agency, never on the mode.** `boardMode()` answers "is every departing route rail", which the Seattle Streetcar and the Monorail also are, and Sounder is Sound Transit while its stations are not Link. A logo is a claim about who runs the service, so it may only be drawn where the name would have said the same thing; anything else gets `textLockup()` and its own name.
+
+**That gate is only as honest as the name behind it, and the name was not.** `agencyName()` returned the first entry of `references.agencies`, which is not the operator — the *Metro* stop `1_600` lists Sound Transit first. It now reads the agency off the routes actually departing, and falls back to the agency whose stop was requested. Position one happened to be right on the rail fixtures, which is exactly why this was worth fixing before a wrong word became a wrong picture.
+
 **Asset notes.** The reversed (white) Metro logo comes from `cdn.kingcounty.gov/-/media/king-county/depts/metro/logo-art/metro/metro-logo-reversed-200x75` and is embedded as a base64 PNG in an `<image>` element. Brand rules are at `projects.seattletransitmap.com/library/King County Metro/Graphic Standards/7.0.2-p-Logo.pdf` — note that the Verdana it specifies applies to stationery address blocks, **not** to the signage face.
+
+The Sound Transit lockup comes from the official `web-brand-logo-horizontal-rgb-png.zip` at `soundtransit.org/get-to-know-us/our-brand/logos`, which ships black, blue and white versions; all three are kept in `assets/sources/sound-transit/` and the **white** one is what their guidelines call for on a dark field. `src/assets/sound-transit-logo.js` is that file recoded from RGBA to greyscale-plus-alpha, which halves the bytes and loses nothing a greyscale panel could have shown. Natural size 1218x185, already its own bounding box — no padding to trim, and no re-framing or recolouring of the kind the OneBusAway mark needed. **Resizing it smaller makes the file bigger**, because the artwork's alpha is nearly binary and resampling fills it with intermediate values; keep it at natural size and let resvg scale it down.
 
 **The OneBusAway mark is no longer drawn, decided 2026-08-01.** The footer is now just the "Updated at" stamp and the stop name, and the stamp starts at the left margin instead of clearing a logo. `obaMark()` and the pre-cleaned assets stay in `src/render/board.js` and `src/assets/` — putting the mark back is a one-line change, and the notes below are why re-deriving it would not be. Keep them.
 

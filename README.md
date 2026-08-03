@@ -8,7 +8,7 @@ It runs entirely serverless on a free Cloudflare Worker. Nothing runs on your ho
 
 ![Bus board: a King County Metro Departures header with the date and time, then eight departures split into a northbound group for 3rd Ave & Virginia St and a southbound group for 3rd Ave & Pine St, each row with a route badge, destination, and countdown or clock time](assets/bus.png)
 
-![Light rail board: a Sound Transit Link Light Rail header, then eight departures split into northbound and southbound groups for Int'l District/Chinatown, with circular 1 Line and 2 Line badges](assets/light-rail.png)
+![Light rail board: a Sound Transit Departures header with the date and time, then eight departures split into northbound and southbound groups for Int'l District/Chinatown, with circular 1 Line and 2 Line badges](assets/light-rail.png)
 
 
 ## Documentation

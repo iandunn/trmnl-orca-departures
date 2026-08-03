@@ -74,6 +74,7 @@ function rowsFor( entry, routesById, nowMs, limit ) {
 			routeName: departure?.routeLongName || route?.longName || '',
 			to: departure?.tripHeadsign ?? '',
 			routeType: route?.type,
+			routeAgencyId: route?.agencyId,
 			departsAtMs,
 			live,
 		} );
@@ -159,19 +160,36 @@ function boardMode( groups ) {
 }
 
 /**
- * The header lockup's agency name, for the rail board. The bus board draws Metro's logo instead and
- * never reads this.
+ * Who operates the service on this board, for the rail header. The bus board draws Metro's logo
+ * instead and never reads this.
+ *
+ * **Taken from the routes actually departing, never from the order of the references block.** That
+ * block lists every agency the response touches, and it does not lead with the one that matters: the
+ * Metro stop `1_600` returns `Sound Transit` first, and the Link stop `40_621` returns Sound Transit
+ * first only by luck. Reading position one was right on the fixtures and wrong in principle, and the
+ * cost of that went up when the name became a logo — a picture of the wrong operator is a claim no
+ * reader can discount the way they can discount a misplaced word.
+ *
+ * Falls back to the agency whose stop was asked for, which is a fact about the request rather than a
+ * guess, and covers a board with no departures left to read an agency off.
  */
-function agencyName( results ) {
+function agencyName( results, groups, requestedAgency ) {
+	const departing = new Set(
+		groups
+			.flatMap( ( group ) => group.rows.map( ( row ) => row.routeAgencyId ) )
+			.filter( ( id ) => id !== undefined && id !== null && id !== '' )
+	);
+
+	const wanted = departing.size === 1 ? [ ...departing ][ 0 ] : String( requestedAgency );
+
 	for ( const result of results ) {
 		const agencies = result?.ok ? result.references?.agencies : null;
+		const match = ( Array.isArray( agencies ) ? agencies : [] ).find(
+			( agency ) => String( agency?.id ) === wanted && typeof agency?.name === 'string' && agency.name !== ''
+		);
 
-		if ( Array.isArray( agencies ) && agencies.length > 0 ) {
-			const named = agencies.find( ( agency ) => typeof agency?.name === 'string' && agency.name !== '' );
-
-			if ( named ) {
-				return named.name.toUpperCase();
-			}
+		if ( match ) {
+			return match.name.toUpperCase();
 		}
 	}
 
@@ -217,7 +235,7 @@ export function toBoard( results, { agency, stopIds, directionOverrides, nowMs, 
 
 	return {
 		mode,
-		agency: agencyName( results ),
+		agency: agencyName( results, groups, agency ),
 		...time,
 		groups: groups.map( ( group ) => ( {
 			...group,

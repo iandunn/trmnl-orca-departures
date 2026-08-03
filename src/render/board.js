@@ -10,6 +10,7 @@
  */
 
 import { METRO_LOGO_DATA_URI } from '../assets/metro-logo.js';
+import { SOUND_TRANSIT_LOGO_DATA_URI } from '../assets/sound-transit-logo.js';
 import { collapseRepeatedPhrases } from '../headsign.js';
 import { destinationWithRoute, routeBadge } from '../route-badge.js';
 import {
@@ -352,12 +353,64 @@ const METRO_LOCKUP =
 	`<image href="${ METRO_LOGO_DATA_URI }" x="56" y="16" width="164" height="62"/>` +
 	text( 258, 68, 58, 'Departures', { fill: '#fff' } );
 
-function textLockup( agency, mode ) {
+/** As `agencyName()` in `src/oba/departures.js` reports it — OneBusAway's own name, uppercased. */
+const SOUND_TRANSIT = 'SOUND TRANSIT';
+
+/**
+ * Sound Transit's own lockup, in the same slot Metro's occupies.
+ *
+ * Natural artwork is 1218x185, one line rather than Metro's two, so matching Metro's 62px block
+ * height would set the wordmark half again as tall as `Departures` and let the agency shout over the
+ * word the sign is actually for. It is sized by its cap height instead, judged against a render.
+ *
+ * **A deliberate divergence from their brand standards**, which the header bar cannot honour: clear
+ * space is specified as the height of the `S` in the mark, and 102px of bar has nowhere near that
+ * above and below. Everything else is followed — the official white artwork on a dark field,
+ * unaltered proportions, symbol and typography never separated.
+ */
+const SOUND_TRANSIT_LOCKUP =
+	`<image href="${ SOUND_TRANSIT_LOGO_DATA_URI }" x="56" y="24" width="303" height="46"/>` +
+	text( 397, 68, 58, 'Departures', { fill: '#fff' } );
+
+/**
+ * Whatever OneBusAway calls the operator, for a rail agency we hold no artwork for.
+ *
+ * One line sharing the `Departures` baseline, set smaller and letterspaced so the two read as a
+ * lockup rather than as a sentence. It carried a second line naming the service — `LINK LIGHT RAIL`,
+ * hardcoded — until the Sound Transit logo landed, at which point the only agencies still reaching
+ * here were the ones that line was wrong for. Nothing in the data names a service, so it went.
+ */
+function textLockup( agency ) {
+	const size = 44;
+	const spacing = 2;
+
+	// `Departures` clears the name rather than sitting at a fixed x, because the name can be long and
+	// nothing here can measure a string. **Uppercase runs far wider than the 0.5 `AVERAGE_ADVANCE` the
+	// rows use**: `CITY OF SEATTLE` measures 0.50 per character and `COMMUNITY TRANSIT` measures 0.56,
+	// because one is mostly `I`s and spaces and the other is mostly `M`s and `O`s. 0.62 covers both,
+	// and slack costs nothing on a bar with 1300px to spare — at 0.5 the longer name ran straight
+	// through the word.
+	const estimated = agency.length * ( size * 0.62 + spacing );
+
 	return (
-		text( 56, 44, 30, agency, { fill: '#fff', spacing: 2 } ) +
-		text( 56, 82, 30, mode, { weight: 400, fill: '#b8b8b8', spacing: 2 } ) +
-		text( 430, 68, 58, 'Departures', { fill: '#fff' } )
+		text( 56, 68, size, agency, { fill: '#fff', spacing } ) +
+		text( Math.round( Math.max( 430, 56 + estimated + 38 ) ), 68, 58, 'Departures', { fill: '#fff' } )
 	);
+}
+
+/**
+ * The two agencies this sign can draw get their logo; anyone else gets their name.
+ *
+ * Gated on the agency rather than on the mode, because `boardMode()` answers "are all these routes
+ * rail", which the Seattle Streetcar and the Monorail also are. A logo is a claim about who runs the
+ * service, so it may only be drawn where the name would have said the same thing.
+ */
+function headerLockup( board, mode ) {
+	if ( mode !== 'rail' ) {
+		return METRO_LOCKUP;
+	}
+
+	return board.agency === SOUND_TRANSIT ? SOUND_TRANSIT_LOCKUP : textLockup( board.agency );
 }
 
 /**
@@ -401,16 +454,13 @@ export function buildBoardSvg( board ) {
 		destination: destinationWithRoute( row.badge, row.routeName, collapseRepeatedPhrases( row.to ) ),
 	} );
 
-	// Resolved before anything is drawn, because the type size depends on the longest of them —
-	// tomorrow's rows included, since they sit in the same column and would otherwise be measured
-	// against nothing and overrun the time.
+	// Resolved before anything is drawn, because the type size depends on the longest of them.
 	const prepared = groups.map( ( group ) => ( {
 		...group,
 		rows: group.rows.map( withDestination ),
-		tomorrow: ( group.tomorrow ?? [] ).map( withDestination ),
 	} ) );
 	const destinationFontSize = destinationSize(
-		prepared.flatMap( ( group ) => [ ...group.rows, ...group.tomorrow ].map( ( row ) => row.destination ) ),
+		prepared.flatMap( ( group ) => group.rows.map( ( row ) => row.destination ) ),
 		scaled
 	);
 
@@ -440,38 +490,15 @@ export function buildBoardSvg( board ) {
 			// the reader then has to interpret. Centred in the space it explains, it reads as the
 			// deliberate answer to "why is half this sign empty".
 			//
-			// **When tomorrow's first departures are known, they go under it rather than instead of
-			// it.** "Nothing more today" and "here is the first one tomorrow" are two different facts
-			// and a reader late at night wants both — dropping the sentence would leave rows that
-			// look like a normal board, which is the one thing this group must not look like.
-			const tomorrow = group.tomorrow ?? [];
-			const messageY = tomorrow.length
-				? y + scaled( 62 )
-				: y + Math.round( span / 2 ) + scaled( 20 );
+			// This band also listed tomorrow's first departures under the sentence until 2026-08-02,
+			// when it was removed because nothing ever produced the data. `docs/todo-someday.md` has
+			// what it looked like and what putting it back would need.
+			const messageY = y + Math.round( span / 2 ) + scaled( 20 );
 
-			body += text( PANEL_WIDTH / 2, messageY, scaled( tomorrow.length ? 46 : 64 ), group.message ?? '', {
+			body += text( PANEL_WIDTH / 2, messageY, scaled( 64 ), group.message ?? '', {
 				weight: 400,
 				fill: GREY,
 				anchor: 'middle',
-			} );
-
-			// They are drawn at the group's own row pitch, starting a row down, so they line up with a
-			// working direction on the other half of the board instead of forming a second grid.
-			tomorrow.slice( 0, ( group.reserved || 1 ) - 1 ).forEach( ( row, rowIndex ) => {
-				const top = y + ( rowIndex + 1 ) * rowHeight;
-
-				body +=
-					badge( LEFT, top + scaled( 26 ), row.badge, mode, scaled ) +
-					text( DESTINATION_LEFT, top + scaled( 94 ), destinationFontSize, row.destination ) +
-					// `Tomorrow` where a scheduled row says `Scheduled`. Same slot, same job: the word
-					// that stops the number below it being read as the next bus.
-					text( RIGHT, top + scaled( 40 ), scaled( 32 ), 'Tomorrow', {
-						weight: 400,
-						fill: GREY,
-						anchor: 'end',
-					} ) +
-					text( RIGHT, top + scaled( 106 ), scaled( 76 ), row.value, { anchor: 'end' } ) +
-					( row.unit ? text( RIGHT, top + scaled( 144 ), scaled( 36 ), row.unit, { anchor: 'end' } ) : '' );
 			} );
 
 			y += span;
@@ -510,7 +537,7 @@ export function buildBoardSvg( board ) {
 		} );
 	} );
 
-	const lockup = mode === 'rail' ? textLockup( board.agency, 'LINK LIGHT RAIL' ) : METRO_LOCKUP;
+	const lockup = headerLockup( board, mode );
 
 	return (
 		`<svg xmlns="http://www.w3.org/2000/svg" width="${ PANEL_WIDTH }" height="${ PANEL_HEIGHT }" viewBox="0 0 ${ PANEL_WIDTH } ${ PANEL_HEIGHT }">` +

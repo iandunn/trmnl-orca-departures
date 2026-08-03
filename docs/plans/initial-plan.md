@@ -1,47 +1,19 @@
-# Metro Departures Sign — Project Handoff
+# Archive — the original planning handoff
 
-Context handoff from a claude.ai planning conversation. Everything below is decided unless marked OPEN.
+**This is a record of how the project was planned, not a description of what it is.** It began as a context handoff from a claude.ai planning conversation and was amended through 2026-07-31 and 2026-08-01 as research contradicted it. It stopped being maintained on 2026-08-02.
 
-Sections dated **2026-07-31** were added during a Claude Code planning session and either verify, correct, or supersede the original text. Where they conflict, the dated section wins.
+**For current state read [`../../CLAUDE.md`](../../CLAUDE.md)**, plus `src/render/CLAUDE.md` for the board design and `src/stats/CLAUDE.md` for the Analytics Engine schema. Where this file disagrees with those, those win. Do not re-derive a decision from anything below.
+
+**Why it is kept.** Two bodies of work exist nowhere else and would be expensive to reproduce:
+
+- **The firmware research** — four passes against `[env:TRMNL_X]` at commit `9f3a1eb` and FastEPD at its pinned `855ce9a4`, covering image format, failure behaviour, the HTTP contract and cache gate, and refresh semantics. `CLAUDE.md` carries the conclusions that constrain our code; these sections carry the file-and-line citations behind them, the OG-scoped pass they corrected, and the eight documented beliefs that turned out wrong.
+- **The `blueset/trmnl-recipes` prior-art analysis** — the only other Puget Sound OneBusAway board for TRMNL, read in full.
+
+A third part is worth reading rather than skipping: the render-cost sections record a wrong conclusion drawn from correctly measured numbers. Hosting was declared impossible on Workers Free against a 10 ms budget that was never verified and is really ~1000 ms.
+
+Everything else is a snapshot. Roughly half of these decisions were reversed, and the reversals are left in place with their reasoning rather than tidied away, because why something was rejected is the part a rewrite destroys. Read any sentence here as "believed on the date in its heading", never as "true now". Struck text marks a belief its own section later overturned.
 
 -------------------------------
-
-# STATE — session 2026-07-31, updated later the same day. Read this first.
-
-**Nothing has been built.** No `package.json`, no worker. This doc and `CLAUDE.md` are the only artifacts; `docs/TODO.md` is empty. The repo *does* exist — `git init` has been run, branch `main`, **zero commits**.
-
-## Decided this session
-
-- **Name: `trmnl-orca-departures`.** Folder name need not match the worker name.
-- **Device: the TRMNL X.** Being purchased. See Addendum 01 and the blog update below.
-- **Stop: chosen and verified live**, but never written down here. It lives in `.dev.vars` as `DEV_STOP_ID` and travels in a URL path segment.
-- **Access control:** shared secret in the URL path, held in a Worker secret.
-- **Hosting: online, not a Pi.** A Pi is possible but explicitly less preferred.
-- **Cloudflare: a NEW account dedicated to this project, on the Free plan.** Free is confirmed sufficient (see item 1 under Blocked); there is no reason to upgrade. The Worker has been created and its name is confirmed as `trmnl-orca-departures`, but as of 2026-08-01 it still serves Cloudflare's stock dashboard "Hello World" template — the first `wrangler deploy` replaces it. The deployed origin is in `.dev.vars` as `WORKER_ORIGIN`, not here.
-- BYOS contract, auth model, cache semantics, image format, and the firmware landmine list — all verified against primary source. See the dated sections below.
-
-## Blocked, in priority order
-
-1. ~~**The 10 ms CPU question.**~~ — **DONE 2026-08-01, and the answer is that there was never a problem.** A throwaway spike was deployed to the real account and billed CPU read from `wrangler tail`: the Free ceiling is **~1000 ms per invocation**, not 10 ms, and one full 1872x1404 render costs **~58 ms**. About 17x headroom. The spike has been deleted. See "RESOLVED — Workers Free fits" below. **The renderer is unblocked.**
-2. ~~**X-class firmware verification**~~ — **DONE.** Four clusters were researched against `[env:TRMNL_X]` at commit `9f3a1eb`, and the refresh pass also read FastEPD at its pinned SHA. Written up below: image format, failure behavior, the HTTP contract / cache gate, and refresh semantics. Between them they answered every question originally listed here, corrected eight documented beliefs, and turned up four hazards the doc did not have — the body-`status: 500` factory reset, `{"status": 200}` being silently discarded, the stuck error screen, and the 31-character filename. **The panel is confirmed 1872x1404.** Nothing further is answerable from source; what remains needs the physical device.
-3. ~~**`git init`**~~ — done; the folder is now a repo and is named `trmnl-orca-departures`.
-
-### Failure design — where to pick this up
-
-The firmware research is finished and written up in the four "X-class …" sections below. Those sections are findings. What is **not** yet decided is what our server does about them. Coming back to this, these are the open decisions, in the order they matter:
-
-1. **Filename generation is the whole design.** It has to satisfy four constraints at once: a content hash so unchanged renders are free; a **10-digit epoch suffix** or the cache self-destructs; **never exactly 31 characters**; and a **distinct-but-stable** name per error state. Get this one function right and most of the failure behavior follows. Write it with tests first — it is pure, so it is cheap to test and expensive to debug on a wall.
-2. **Decide the recovery-perturbation rule.** Because firmware error screens never update the device's cached filename, a recovered server that returns its previous filename leaves the error screen up forever. So the server must know it was previously failing and change the filename on recovery. That means keeping a small amount of state (last-response outcome) somewhere — a KV key, or inferring it from a gap in `/api/log` telemetry. **This is the one place where the failure design needs persistence rather than pure functions.**
-3. **Enumerate our own degraded screens** and give each a stable filename: OBA unreachable, OBA returned no departures, real-time missing for some routes, render failed. Each needs to look obviously degraded at a glance from across a room, not just carry small print.
-4. **Pick the staleness threshold** past which countdowns are refused and only clock times are shown. The firmware provides no help here — there is no staleness tracking of any kind — so this is entirely ours.
-5. **Decide whether to shorten `refresh_rate` on failure** to recover sooner, and how that interacts with the firmware's own 15/30/60s ladder underneath us.
-
-Two things the server can never fix, worth accepting rather than designing around: after 4 consecutive WiFi failures the device sleeps with no timer armed and is dead until physically touched; and a power cycle while the server is unreachable wipes the departures and leaves a logo screen.
-4. Remaining OPEN items: commute windows, OBA API key, enclosure color, route filtering.
-
-## Scratch work that did NOT survive
-
-~~The resvg spike lived in a session scratchpad and is gone.~~ **Rebuilt 2026-08-01 and kept this time**, at `assets/sources/` — worker source, `wrangler.toml`, `package.json` and a sample render. It includes the quantization pass the original omitted, the hand-written 4-bit greyscale PNG encoder, and an antialiasing toggle. The corrected pattern is in `CLAUDE.md`; note that the version recorded there previously was broken in two ways (WOFF font, wasm as a Data module).
 
 ## Goal
 
@@ -49,7 +21,7 @@ Build a wall-mounted e-paper display that shows live King County Metro departure
 
 **Corrected 2026-08-01: the sign lives in the author's own home.** Earlier revisions of this doc described it as a gift going to someone else's house, and that premise is load-bearing in several rejected options — most importantly the Raspberry Pi, which was rejected *only* because it would have put the server on a different network from the sign. That objection is void. Anyone else wanting one forks the repo and stands up their own backend, so "portable to another person's stop" is a repo property, not a runtime one.
 
-## Hardware — SUPERSEDED (was: TRMNL OG; now the X, see Addendum 01 and STATE above)
+## Hardware — SUPERSEDED (was: TRMNL OG; the X was chosen instead, see Addendum 01)
 
 Ordered: TRMNL OG ($139) + Clarity Kit ($25) = $164. No BYOD license needed.
 
@@ -72,90 +44,15 @@ BYOS = Bring Your Own Server (their hardware, our backend). Free — no license.
 
 Every rejected option here — Pages, a Pi, a hosted plugin, and running Terminus — is written up properly in [`../alternatives.md`](../alternatives.md). That doc is current; this one is a record.
 
-### Project scaffolding — BUILT 2026-07-31
+### Project scaffolding
 
-Written out rather than left as "copy the setup from the other Worker project," so this doc stands alone. Plain JS, no TypeScript, no framework.
+This began as a full proposal — `wrangler.toml`, `package.json`, dev dependencies, `.nvmrc`, the secrets procedure, where to persist `/api/log` — and every part of it has since been built and superseded by the committed files. The listings are deleted rather than kept, because a stale copy of a config file is exactly the thing that gets read as authoritative. `CLAUDE.md` carries what is still load-bearing: the two `[[rules]]` corrections, the secrets-before-first-deploy ordering, and why there is no repo `.gitignore`.
 
-**Status: this section is no longer a proposal.** Every file below exists in the repo. The four results were first verified 2026-07-31 and **re-verified 2026-08-01** after `package.json` swapped `@fontsource/inter` for `@expo-google-fonts/inter` and the `[[rules]]` globs changed: `npm install` resolves 157 packages with 0 vulnerabilities on node v20.20.2, `npm test` passes, `npm run lint` is clean, and `wrangler deploy --dry-run` bundles at 0.25 KiB.
+Three things from it are worth having as history rather than as instruction:
 
-~~One caveat on that last one: `src/worker.js` imports nothing, so the dry-run proves only that the toml parses.~~ **No longer a caveat.** `src/render/index.js` now imports the wasm and the Fira Sans TTFs for real, and the whole pipeline was run end to end against the local dev server on 2026-08-01 — the Data rule resolves.
-
-- `npm test` — 1 test passing (asserts the stub 404s on `/`, `/api/setup`, `/api/display`, `/api/log`).
-- `npm run lint` — clean.
-- `npx wrangler deploy --dry-run` — `wrangler.toml` parses, entrypoint bundles at 0.25 KiB.
-- `wrangler dev` — boots and returns 404 on all three BYOS paths.
-
-Two corrections were found while building it, and are folded into the config below.
-
-`wrangler.toml` — the whole shape that is actually needed:
-
-```toml
-name = "trmnl-orca-departures"
-main = "src/worker.js"
-compatibility_date = "2026-06-07"
-preview_urls = true
-
-[observability.logs]
-enabled = true
-
-# Required for the resvg wasm module and the bundled font, or the static imports fail.
-# `fallthrough` keeps wrangler's built-in Data rule for `**/*.bin` active instead of shadowing it.
-[[rules]]
-type = "Data"
-globs = ["**/*.wasm", "**/*.woff"]
-fallthrough = true
-```
-
-**Both globs above are wrong** — superseded 2026-08-01 by "Re-measured properly" below. `**/*.wasm` as Data makes `initWasm()` throw under workerd, and `**/*.woff` points at a font format resvg cannot read. The committed file now globs `**/*.ttf` alone. Kept here only because the two corrections underneath it are about this block.
-
-**Correction 1 — `fallthrough = true` is required to keep wrangler quiet.** Without it every `wrangler` invocation warns that this rule shadows the built-in `{"type":"Data","globs":["**/*.bin"]}` default. Harmless but noisy, and noise in a build that will later be debugged for silent PNG failures is worth eliminating now.
-
-~~**Correction 2 — the spike's `.woff` import path is real, not stale.**~~ **WRONG, and this is the one that cost the most.** The file does exist — `@fontsource/inter` ships 126 `.woff` alongside 126 `.woff2` — so checking that the path resolved confirmed nothing. resvg cannot *read* a WOFF, and it says so by silently rendering no text. Existence was the wrong test; the right one is looking at the image. See "Re-measured properly" below. `node_modules/@resvg/resvg-wasm/index_bg.wasm` does exist as documented.
-
-`package.json` scripts, minus everything SPA-shaped (`name` and `private` added on top of the original sketch):
-
-```json
-{
-  "name": "trmnl-orca-departures",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "eslint ."
-  }
-}
-```
-
-Dev dependencies: `wrangler`, `vitest`, `eslint`, `@eslint/js`, `globals`. Runtime: `@resvg/resvg-wasm`, and `@expo-google-fonts/inter` for TTFs (**not** `@fontsource/inter`, which is WOFF-only — see below). Use eslint's flat config (`defineConfig` + `globalIgnores` from `eslint/config`) with `js.configs.recommended` and `globals.browser` — no React plugins, no `typescript-eslint`.
-
-**`package-lock.json` now exists** (generated 2026-08-01, 157 packages, untracked so far — decide whether to commit it; for a deployable Worker the usual answer is yes). Sandbox rules block writes to `node_modules/` and `package-lock.json` anywhere inside this repo tree, so an agent cannot run `npm install` here — that step is the human's, and any agent changing `package.json` has to hand it back rather than installing. Confirmed empirically: the install fails `EPERM` on `mkdir node_modules`.
-
-`.nvmrc`: `lts/iron`. Run `nvm use` before anything else; nothing else in the tooling reads it automatically.
-
-**`src/worker.js` is a 404 stub, deliberately.** It is not a placeholder waiting to be filled in one endpoint at a time. A partially built `/api/display` is more dangerous than none: a response missing `refresh_rate` parses as 0 and hot-loops the device until the battery is flat, and a body of `{"status": 500}` factory-resets it. `/api/display` only becomes safe once `refresh_rate`, `filename` and `status: 0` are all correct together. Until then a bare 404 is inert and the device falls back to its own error screen. The test asserts exactly this, so it will fail loudly the moment someone implements half an endpoint.
-
-**Secrets.** `npx wrangler secret put NAME` for each of `DEVICE_TOKEN` and `OBA_API_KEY`; local equivalents go in `.dev.vars` as bare `NAME=value` lines. **Do not set secrets through the Cloudflare dashboard's Variables UI — `wrangler deploy` wipes those.** The CLI-set ones persist. Non-secret config (an account ID, say) belongs in `[vars]` in `wrangler.toml` instead.
-
-**Ordering matters: set both secrets *before* the first `wrangler deploy`, not after.** A deployed Worker where `env.DEVICE_TOKEN` is `undefined` makes the token comparison degenerate — depending on how the check is written, that is an open endpoint, and the whole point of the token is to stop a stray crawler burning the OneBusAway quota. There is no reason to run `secret put` any earlier than that, though: secrets attach to a deployed Worker, and nothing exists on the account yet.
-
-~~**`.gitignore` must be explicit about `.dev.vars` and `.wrangler`.**~~ **Overruled 2026-08-01 — there is no repo `.gitignore` and that is deliberate.** `~/.gitignore_global` already covers `.dev.vars`, `.cloudflare.env`, `.wrangler`, `.npm-cache` and `.claude`, verified with `git check-ignore`, so a repo file would duplicate all of it and carry nothing. The standing rule for this repo: **ignore only what is specific to this repo**, and right now nothing is.
-
-The argument the original text made — that a duplicate protects clones on other machines whose global differs — is noted and rejected for a personal project. If someone forks this, the files in question do not exist in their checkout until they create them, so nothing leaks from the repo itself.
-
-**Unresolved:** this section originally also said to list `node_modules`, `dist`, `*.log`, `*.local`, `.DS_Store`, `.vscode/*`, `.idea` in the repo `.gitignore`. The committed `.gitignore` instead opens with a comment deferring all generic entries to `~/.gitignore_global`, and only carries the three secret-bearing paths. Those two positions contradict each other and the file was left as-is rather than overriding the comment. Decide which one wins.
-
-**Where to persist `/api/log`.** Two Free-plan options, and the choice matters:
-
-- **Workers Analytics Engine** — free on the Free plan (~100k data points/day written, 10k read queries/day, ~3-month retention), and critically it does **not** consume the KV write quota. Bind it with `[[analytics_engine_datasets]]` and query it over the SQL API. Best fit for per-wake telemetry (battery voltage, RSSI, wake reason, cache hit/miss), which is exactly the shape it wants.
-- **KV** — the Free plan's daily write quota is low enough to be a real constraint for anything written on every device wake. Fine for a handful of state keys, wrong for a log.
-
-Note that reading Analytics Engine back requires a Cloudflare API token with **Account Analytics: Read**, stored as its own secret. Counts should use `SUM(_sample_interval)` rather than `COUNT()` so they stay correct if Cloudflare ever samples — it will not at this volume, but the query is no harder to write correctly the first time.
-
-Optional, worth it once there is a test suite: a `postinstall` of `git config --local core.hooksPath git-hooks` plus a pre-commit hook, so lint and tests gate commits for this repo only without touching global git config. **Deliberately skipped for now** — with one stub test there is nothing worth gating on, and a `postinstall` that rewrites local git config is a surprise in a repo that currently does nothing. Revisit once the renderer has real tests.
+- **The `wrangler.toml` originally specified here was wrong in two ways, and both failed silently.** It declared a wasm glob as `type = "Data"`, which overrides wrangler's built-in `CompiledWasm` rule and makes `initWasm()` throw `CompileError: Wasm code generation disallowed by embedder` under workerd. And it globbed `**/*.woff`, a format resvg cannot read at all. The second is the more instructive of the two: the original spike verified that the font path *resolved* rather than that text *rendered*, so it confirmed nothing — `@fontsource/inter` really does ship 126 `.woff` files, and resvg really does drop every one of them without an error. Existence was the wrong test. See "Re-measured properly" below.
+- **`src/worker.js` shipped as a deliberate 404 stub**, not a placeholder to be filled in one endpoint at a time. A half-built `/api/display` is more dangerous than none: a response missing `refresh_rate` parses as 0 and hot-loops the device until the battery is flat, and a body of `{"status": 500}` factory-resets it. That reasoning survives in `CLAUDE.md` as the rule that the four endpoints change together.
+- **Analytics Engine was chosen over KV for `/api/log` at planning time**, because KV's Free write quota is a real constraint for anything written on every device wake and Analytics Engine's is not, nor does it compete with KV's. That call held; `src/stats/CLAUDE.md` documents the schema it grew into.
 
 ### Rendering pipeline
 
@@ -168,6 +65,8 @@ Device wants a bitmap, not HTML. Workers can't run headless Chrome on the free t
 
 #### Spike results, 2026-07-31 — measured, not estimated
 
+**Every millisecond figure in this section and the next one is void**, for two separate reasons established later the same week: the spike rendered no text at all, and the 10 ms budget it was measured against is not the real limit. They are kept because the shape of both errors is the useful part. "Re-measured properly" and "RESOLVED" below are the numbers that held.
+
 Built a throwaway Worker rendering a realistic approximation of the layout (header bar, three rows, badges, rules, footer) with Inter regular + bold bundled as `[[rules]] type = "Data"` wasm/font modules.
 
 - **It works.** `initWasm(resvgWasm)` with a statically imported `.wasm` module runs under workerd, and `new Resvg(svg, { font: { fontBuffers } }).render().asPng()` produced a correct 800x480 PNG (4.5 KB for this layout — nowhere near a RAM problem).
@@ -178,7 +77,7 @@ Built a throwaway Worker rendering a realistic approximation of the layout (head
 
 Also worth noting: Free allows 50 subrequests per invocation, which is ample here.
 
-#### Re-measured for the X — 2026-07-31. This is now the project's hardest constraint
+#### Re-measured for the X — 2026-07-31. Believed at the time to be the project's hardest constraint
 
 The account is on **Workers Free**, and Addendum 01 switches the hardware to the X. Those two facts collide. Re-measured with the same spike, scaling output via resvg's `fitTo`:
 
@@ -502,15 +401,11 @@ The body-`status` dispatch handles exactly `0`, `202` and `500`. **Everything el
 - `firmware_url` only ever updates the S3 app partition; the C5 is flashed from a local file.
 - OTA is rate-limited 24h **on failure**, and an unsynced clock plus any prior attempt blocks it indefinitely.
 
-### Log the logs
-
-`/api/log` is the only diagnostic channel into a device with no screen output of its own. Persist it somewhere readable from the start, before it's needed.
-
-## Refresh strategy — decided
+## Refresh strategy — decided 2026-07-31, and later simplified
 
 Server controls the sleep interval per response. That's where this logic lives.
 
-**These are defaults, not constants — updated 2026-08-01.** All three live in `[vars]` in `wrangler.toml` (`REFRESH_ACTIVE_SECONDS`, `REFRESH_IDLE_SECONDS`, `ACTIVE_START`, `ACTIVE_END`, `TIMEZONE`) per the no-hardcoding rule in `CLAUDE.md`. A fork with different hours edits one block.
+**The three-tier schedule below was cut to two states when it was built.** There are no commute windows to describe — the sign polls at one rate the whole time it is on, and sleeps once until morning outside that — so `REFRESH_IDLE_SECONDS` was deleted rather than left unconsumed. `CLAUDE.md` has the shape that shipped, and `src/schedule.js` is the only thing that decides `refresh_rate`.
 
 - 60s during the user's actual leave-the-house windows
 - ~15 min outside them
@@ -635,7 +530,7 @@ Someone has already shipped a Puget Sound OneBusAway board for TRMNL: [`blueset/
 
 What it settles for us:
 
-- **Where the OneBusAway API key comes from** — Sound Transit's Open Transit Data program, `soundtransit.org/help-contacts/business-information/open-transit-data-otd`. That was an open question in `docs/TODO.md` with a "where to get it?" note attached. It is a request form, not a self-serve signup, so start it early.
+- **Where the OneBusAway API key comes from** — Sound Transit's Open Transit Data program, `soundtransit.org/help-contacts/business-information/open-transit-data-otd`. That was an open question at the time, with a "where to get it?" note attached. It is a request form, not a self-serve signup, so start it early.
 - **One subrequest per stop is enough.** The author makes two calls per stop — `/stop/{id}.json` and then `/arrivals-and-departures-for-stop/{id}.json` — but the arrivals response already carries `data.references.stops` and `data.references.routes`, which is everything the first call returns. They need the extra call only to compute distance and bearing from a lat/lon origin, which a fixed-stop sign has no use for. So: **one fetch per stop**, and the route metadata (short name, long name, colour) rides along free.
 - **`Intl.DateTimeFormat` with `timeZone: "America/Los_Angeles"` works in Workers**, used via `formatToParts` to pull hour and minute. The load-bearing "as of h:mm" stamp therefore needs no timezone library and no bundled tz database. Worth knowing before someone reaches for one.
 - **Dedup by `tripId`.** A single stop can return the same trip more than once; the author keeps one entry per `tripId` and drops anything already in the past. Both are cheap and both are correctness bugs if skipped.
@@ -644,7 +539,7 @@ What it settles for us:
 - **Route colour maps to grey by WCAG relative luminance**, bucketed into eight steps, with the text flipped to black or white against it. On a 16-grey panel that is a better use of the greys than picking greys by hand, and OBA hands us `route.color` for free.
 - **Stop-name segmentation.** Names are `A & B` cross-streets; shared components between nearby stops get dimmed so the differing part reads first. Only relevant to us if the sign shows two stops.
 
-**This answers the north/south question in `docs/TODO.md`.** Opposite directions are two distinct OBA stop IDs, and `stop.direction` is a plain compass string (`N`, `NE`, `E`, …) already in the API response. The author's board simply renders multiple stop groups stacked, each with its own header. At 1872x1404 there is room for two groups without any toggling, so the touch-bar toggle idea is unnecessary — and the touch bar's left/right taps repaint from the local playlist cache with zero HTTP anyway, so it could not drive a live toggle even if we wanted one. The open piece is only how a second stop is expressed in the device URL.
+**This answered the open north/south question.** Opposite directions are two distinct OBA stop IDs, and `stop.direction` is a plain compass string (`N`, `NE`, `E`, …) already in the API response. The author's board simply renders multiple stop groups stacked, each with its own header. At 1872x1404 there is room for two groups without any toggling, so the touch-bar toggle idea is unnecessary — and the touch bar's left/right taps repaint from the local playlist cache with zero HTTP anyway, so it could not drive a live toggle even if we wanted one. The open piece is only how a second stop is expressed in the device URL.
 
 **Stop ID shapes to design for**, from the author's own placeholder examples: `40_532`, `1_1550`, `96_SCM`, `40_E15-T1`, `40_S_KS_T3`. Route IDs likewise: `40_100479`, `23_100340`, `40_2LINE`, `51_60`. The agency prefix is the first underscore-delimited field and the rest is opaque — this is what drove the labelled-segment URL decision above.
 
@@ -652,7 +547,9 @@ What it settles for us:
 
 Because the author's plugin renders on TRMNL's servers, the CPU question does not exist for them, which made "abandon BYOS, ship a private plugin, keep the Worker as a JSON endpoint" a real option. It was rejected: see [`../alternatives.md`](../alternatives.md#a-hosted-trmnl-plugin) for what it costs.
 
-## Layout spec
+## Layout spec — the OG-sized original, superseded
+
+Written for 800 × 480 and three rows, before the hardware changed. The design that shipped is 1872 × 1404 with four departures in each of two direction bands, and it is documented in `src/render/CLAUDE.md` against photographs of the real signs. What survived from here is the vocabulary — the black header bar, the rounded-rect badge, the stacked number over unit, the thin rules — and the countdown-versus-clock-time reasoning. What did not survive is the row count, the per-row formatting rule below, and the typeface guess.
 
 Match the Connectpoint design at 800 × 480:
 
@@ -665,29 +562,9 @@ Match the Connectpoint design at 800 × 480:
 
 Typeface: the actual Metro face is unidentified. Inter or Archivo gets ~95% there. The recognizable elements are the rounded-rect badge, the stacked number-over-unit, the thin rules, and the black header bar.
 
-## OPEN — needed before coding starts
+## The open questions and the task order
 
-1. ~~**Stop ID**~~ — **ANSWERED**, verified live against OneBusAway with the `TEST` key. The value is in `.dev.vars` as `DEV_STOP_ID`; it is deliberately not recorded in this repo.
-2. **Which routes to show** — the stop serves only **three**, one of which is a RapidRide line running every 10–15 min, so there is probably nothing to filter out. **But this undercuts the addendum's "expand to 5–6 rows":** with three routes and one of them that frequent, a six-row board is mostly repeated entries for the same route. Decide whether that is a departure board or just padding, and confirm which of the three the user actually uses. Route identities live in `.dev.vars` alongside the stop.
-3. The user's actual commute windows, for the refresh schedule
-4. OneBusAway API key — request it from Sound Transit's Open Transit Data program, the only issuer; `TEST` works for development but is heavily rate-limited
-5. Enclosure color — black matches the real housing; white/sage blends into a wall
-6. Confirm Clarity Kit is in stock (the product page renders both an add-to-cart and a sold-out block, so the scrape was ambiguous)
-7. ~~**Hosting.**~~ — **ANSWERED 2026-08-01: Cloudflare Workers, Free plan, unchanged design.** The 10 ms ceiling was stale; the real limit is ~1000 ms and a render costs ~58 ms.
-8. ~~**Which device?**~~ — **ANSWERED: the X.** So the X-class firmware paths govern, and the OG-specific constants in the research above (90000-byte cap, hard 800x480 checks) do not apply. Being re-verified against `BOARD_X_CLASS`.
-9. ~~**Cloudflare account.**~~ — **DONE.** A new dedicated account exists, credentials live in `.cloudflare.env` (gitignored), and the spike measurement has been run against it. The API token needs `Workers Scripts: Edit`; the default read-only token fails deploys with `Authentication error [code: 10000]`.
-
-## Task order
-
-1. ~~Verify BYOS endpoint contract against docs~~ — done 2026-07-31. Contract, auth, cache semantics, image format and the landmine list are all above
-2. ~~Spike resvg under Workers: does it init, does it fit, what does it cost~~ — done 2026-07-31: yes, yes, ~6 ms at OG size / ~40 ms at X size
-3. **Decide hosting** (OPEN 7) and **which device** (OPEN 8). Everything downstream depends on these two, and no code should be written first
-4. Worker skeleton: setup/display/log, returning a static test PNG. Get `Content-Type`, `refresh_rate` and the content-hash `filename` right from the first commit — those three are the silent-failure trio
-5. Pair the device via the captive portal, confirm it renders anything at all. Persist `/api/log` first; it is the only diagnostic channel
-6. OBA fetch + parse + sort + filter for the configured stop and its routes
-7. Layout, iterated against the real panel — check legibility at physical size, not on a monitor. Redraw at native resolution; do not scale a smaller design up
-8. Refresh scheduling: windowed `refresh_rate` plus stable-filename no-ops for flicker
-9. Hang it
+Both lists are deleted. Every item was answered or overtaken, and `docs/TODO.md` is the live queue. One finding from them is worth carrying, because it is about this particular sign rather than about the software: **the development stop serves only three routes**, one of them a RapidRide line running every 10-15 minutes. That is what undercut the addendum's "expand to 5-6 rows" below — with three routes and one that frequent, a long single-stop board is mostly the same route repeated. The two-stop layout that shipped is the answer to it.
 
 
 -------------------------------
@@ -772,6 +649,6 @@ Read: the X is real and close, but every dated milestone in that post is a suppl
 
 ## Unchanged from the original doc
 
-BYOS architecture, Cloudflare Worker, OneBusAway data source and endpoint, the countdown-vs-clock-time formatting decision, time-windowed refresh_rate logic, and the whole OPEN list (stop ID still blocks everything).
+BYOS architecture, Cloudflare Worker, OneBusAway data source and endpoint, the countdown-vs-clock-time formatting decision, time-windowed `refresh_rate` logic, and every open question the original doc carried — the stop ID blocked everything at this point.
 
 The refresh windowing is now less about battery survival and more about avoiding pointless API calls — keep it, but it can be less aggressive.

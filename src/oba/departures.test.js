@@ -103,6 +103,30 @@ describe( 'toBoard', () => {
 		expect( railBoard().agency ).toBe( 'SOUND TRANSIT' );
 	} );
 
+	// Both fixtures list Sound Transit first in `references.agencies`, including the Metro stop's, so
+	// reading position one returns them for a board they operate none of. The rail lockup draws that
+	// name as a logo, which is a claim about who runs the service.
+	it( 'reads the agency off the departing routes, not the order of the references', () => {
+		expect( busBoard().agency ).toBe( 'METRO TRANSIT' );
+	} );
+
+	// The other branch: no departures left means no routes to read an operator off, and the references
+	// still lead with an agency serving none of them.
+	it( 'falls back to the agency whose stop was asked for when nothing is departing', () => {
+		const tomorrow = toBoard( busResults, {
+			agency: '1',
+			stopIds: [ '600', '430' ],
+			directionOverrides: {},
+			nowMs: busNorth.currentTime + 24 * 60 * 60 * 1000,
+			timezone: TZ,
+			limit: 4,
+			time: formatBoardTime( busNorth.currentTime, TZ ),
+		} );
+
+		expect( tomorrow.groups.every( ( group ) => group.rows.length === 0 ) ).toBe( true );
+		expect( tomorrow.agency ).toBe( 'METRO TRANSIT' );
+	} );
+
 	it( 'formats each row through the ladder', () => {
 		const rows = railBoard().groups[ 0 ].rows;
 

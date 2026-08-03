@@ -36,7 +36,7 @@ Every 8th render additionally gets the slow deep clear rather than the fast one 
 - `src/render/png.js` — quantise and 4-bit greyscale PNG encoder. Pure.
 - `src/render/board.js` — the board as SVG, data-driven, plus `directionLabel()`. Pure.
 - `src/render/index.js` — resvg wiring; the only module that touches wasm or fonts.
-- `src/assets/` — the Metro logo as a data URI and the OneBusAway mark pre-cleaned and pre-recoloured, both generated at author time so nothing is reprocessed per render. The OBA mark is **kept but no longer drawn**; see the asset notes in `src/render/CLAUDE.md`.
+- `src/assets/` — the Metro and Sound Transit logos as data URIs, and the OneBusAway mark pre-cleaned and pre-recoloured, all generated at author time so nothing is reprocessed per render. The OBA mark is **kept but no longer drawn**; see the asset notes in `src/render/CLAUDE.md`.
 - `src/dev/sample-boards.js` — the two reference boards, from real OneBusAway data, four departures per direction. Rendered at a fixed reference instant; `?now=live` on a preview URL uses the real clock.
 - `src/dev/preview.js` — the local contact sheet. **Gated on `DEV_PREVIEW`, which lives in `.dev.vars` and is therefore never deployed.**
 - `src/config.js` — `readConfig()`, the only reader of `env` for a display or scheduling value. Coerces and range-checks everything and never throws; secrets stay off it on purpose. Added 2026-08-01.
@@ -71,7 +71,7 @@ Three things about that wiring are worth knowing before changing it:
 - **Live OneBusAway data is wired in** (2026-08-01), including the format ladder, the mode split, and the per-stop failure treatment. See `src/render/CLAUDE.md`.
 **The `refresh_rate` schedule is in, as of 2026-08-01** — `src/schedule.js`, plus the rest screen in `src/render/overnight.js`. Two states, not three: awake between `ACTIVE_START` and `ACTIVE_END` at `REFRESH_ACTIVE_SECONDS`, and one sleep until the window reopens outside it. See the section below.
 
-- **Next:** the failure-mode sweep. See `docs/TODO.md`.
+- **Next:** the correctness bugs and the quick wins. See `docs/TODO.md`. The failure-mode sweep and the durable-store decision moved to `docs/todo-someday.md` on 2026-08-02 — deliberately deferred, not forgotten.
 
 **A block comment containing a glob will silently break the build.** `**` followed by `/*` closes the comment early and the rest of the file parses as garbage. Write "a wasm glob" in prose instead.
 
@@ -513,6 +513,7 @@ Read `[vars]` only through `readConfig()` in `src/config.js`. Two things it exis
 - **Regenerate `assets/bus.png` and `assets/light-rail.png` whenever the rendered design changes**, from `/_preview` or by driving `sampleBoards()` through the renderer directly. They are the README's screenshots, and its alt text describes them down to the row count — both went stale once already, first when the direction labels changed and again at three rows per direction. Update the alt text in the same commit.
 - **No repo `.gitignore`, deliberately.** `~/.gitignore_global` already covers every relevant path — `.dev.vars`, `.cloudflare.env`, `.wrangler`, `.npm-cache`, `.claude` (confirmed with `git check-ignore`). Add a repo `.gitignore` only if something appears that is genuinely specific to this repo and not already covered.
 - **`docs/TODO.md` is a work queue, not a record.** Finished items are deleted, not checked off — so anything worth keeping moves here, into the relevant doc, or into a code comment *before* the entry goes.
+- **`docs/todo-someday.md` is its overflow.** An item belongs there rather than in `TODO.md` when it is not going to be started soon — blocked on a decision nobody needs to make yet, or explicitly not being built. The test is intent, not size: a small item that will never be picked up goes there, and a large one that is next stays in the queue.
 - **Stack: plain JS, not TypeScript, and no framework.** One Worker, vitest for tests, eslint flat config. Do not add React; there is no SPA and there is not going to be one.
 - **The layout preview needs no build tooling.** Earlier notes reserved the option of adding Vite for it. That turned out to be unnecessary: the Worker already renders the PNG, so `src/dev/preview.js` just serves a page of `<img>` tags pointing at its own render route. One process, no bundler, no second dev server. **Do not add Vite.**
 - `vitest.config.js` aliases `.wasm` and `.ttf` to `vitest.binary-stub.js`, because vitest tries to parse binary modules as JavaScript. The alias pattern must span the whole specifier — Vite substitutes only the matched portion, so anchoring on the extension splices the stub path onto the original.

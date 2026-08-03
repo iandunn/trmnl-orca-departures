@@ -36,7 +36,7 @@ It also gets the hard part right. Terminus derives `filename` from a content has
 
 **Why it lost.** The trade is the whole shape of the project, not a feature toggle, and it fails on the axis this design cares most about: a box in a closet is the component most likely to die quietly. Everything Terminus adds is worth having on a device that shows several things and is tended to. This one shows departures, hangs on a wall, and has to keep being right when nobody is looking at it.
 
-**The middle path is real, though.** Keep this Worker as the sign and pull plugin *data* from `trmnl.com` through the Private API, rendering it ourselves. That brings the ecosystem in without giving up serverless or the render. It is tracked in `TODO.md`.
+**The middle path is real, though.** Keep this Worker as the sign and pull plugin *data* from `trmnl.com` through the Private API, rendering it ourselves. That brings the ecosystem in without giving up serverless or the render. It is tracked in `todo-someday.md`.
 
 ## A hosted TRMNL plugin
 
