@@ -51,8 +51,8 @@ const SPARSE_BOARD = {
 
 describe( 'rowMetrics', () => {
 	it( 'scales the accepted board down to fit, since eight rows do not go at full height', () => {
-		// 1028 of usable height over eight rows, floored.
-		expect( rowMetrics( BUS_BOARD.groups ).height ).toBe( 128 );
+		// 1060 of usable height over eight rows, floored.
+		expect( rowMetrics( BUS_BOARD.groups ).height ).toBe( 132 );
 	} );
 
 	it( 'caps a sparse board at the ceiling rather than stretching it across the panel', () => {
@@ -133,11 +133,11 @@ describe( 'buildBoardSvg', () => {
 	it( 'scales the whole row together, so a denser board is the same layout seen smaller', () => {
 		const dense = buildBoardSvg( BUS_BOARD );
 
-		expect( dense ).toContain( 'y1="288"' );
+		expect( dense ).toContain( 'y1="292"' );
 		expect( buildBoardSvg( SPARSE_BOARD ) ).toContain( 'y1="318"' );
 
 		// Every size inside the row comes down by the same factor rather than being retuned.
-		expect( dense ).toContain( 'font-size="62"' );
+		expect( dense ).toContain( 'font-size="63"' );
 		expect( buildBoardSvg( SPARSE_BOARD ) ).toContain( 'font-size="76"' );
 	} );
 
@@ -230,7 +230,7 @@ describe( 'buildBoardSvg', () => {
 		// A dense board has already scaled the type down past what the longest headsign needs, so the
 		// fit must not shrink it a second time.
 		it( 'does not shrink twice on a dense board', () => {
-			expect( buildBoardSvg( BUS_BOARD ) ).toContain( 'font-size="47" fill="#111">Rainier Beach' );
+			expect( buildBoardSvg( BUS_BOARD ) ).toContain( 'font-size="48" fill="#111">Rainier Beach' );
 		} );
 	} );
 
@@ -259,6 +259,90 @@ describe( 'buildBoardSvg', () => {
 
 		expect( svg ).toContain( 'Saturday' );
 		expect( svg ).toContain( 'August 1' );
+	} );
+
+	/**
+	 * Centring is the invariant, not the offsets.
+	 *
+	 * The row used to be laid out as distances from its top, and the parts drifted apart as the type
+	 * scale and the row height were retuned around them. These assert the relationships instead, so
+	 * nothing here has to be rewritten the next time a size changes — and a hardcoded offset creeping
+	 * back in fails them.
+	 */
+	describe( 'row centring', () => {
+		/** Fira Sans's own cap height, measured off the TTF, and independent of the renderer's copy. */
+		const CAP_RATIO = 0.693;
+		const capCentre = ( baseline, size ) => baseline - ( size * CAP_RATIO ) / 2;
+
+		const groupWith = ( rows ) => ( { ...BUS_BOARD, groups: [ { ...BUS_BOARD.groups[ 0 ], rows } ] } );
+
+		/** `13` → `Seattle Pacific University Seattle Center W`, `4 min`, live. */
+		const [ , LIVE_ROW, SCHEDULED_ROW ] = BUS_BOARD.groups[ 0 ].rows;
+
+		const plate = ( svg ) => {
+			const [ , top, height ] = svg.match( /<rect x="60" y="(\d+)" width="152" height="(\d+)"/ );
+
+			return Number( top ) + Number( height ) / 2;
+		};
+		const textAt = ( svg, x, content ) => {
+			const [ , y, size ] = svg.match(
+				new RegExp( `<text x="${ x }" y="(\\d+)"[^>]*font-size="(\\d+)"[^>]*>${ content }` )
+			);
+
+			return { baseline: Number( y ), size: Number( size ) };
+		};
+
+		it( 'centres the badge plate on the row', () => {
+			// Two rows, so the divider between them says where the first row ends without this needing
+			// to know the header and band heights.
+			const board = groupWith( [ LIVE_ROW, SCHEDULED_ROW ] );
+			const svg = buildBoardSvg( board );
+			const rowBottom = Number( svg.match( /<line x1="60" y1="(\d+)"/ )[ 1 ] );
+
+			expect( plate( svg ) ).toBeCloseTo( rowBottom - rowMetrics( board.groups ).height / 2, 0 );
+		} );
+
+		it( 'puts the badge numeral and the destination on one baseline, as Metro does', () => {
+			const svg = buildBoardSvg( groupWith( [ LIVE_ROW ] ) );
+
+			expect( textAt( svg, 136, '13' ).baseline ).toBe( textAt( svg, 252, 'Seattle' ).baseline );
+		} );
+
+		it( 'centres the destination on the row', () => {
+			const svg = buildBoardSvg( groupWith( [ LIVE_ROW ] ) );
+			const destination = textAt( svg, 252, 'Seattle' );
+
+			expect( capCentre( destination.baseline, destination.size ) ).toBeCloseTo( plate( svg ), 0 );
+		} );
+
+		// The value and the unit are one block. Centring the value alone leaves the pair hanging below
+		// everything else in the row, which is what it did before 2026-08-03.
+		it( 'centres the value and its unit as a block', () => {
+			const svg = buildBoardSvg( groupWith( [ LIVE_ROW ] ) );
+			const value = textAt( svg, 1812, '4' );
+			const unit = textAt( svg, 1812, 'min' );
+			const blockCentre = ( value.baseline - value.size * CAP_RATIO + unit.baseline ) / 2;
+
+			expect( blockCentre ).toBeCloseTo( plate( svg ), 0 );
+		} );
+
+		// A `Now` has no unit to be centred with, so it is centred on its own rather than sitting where
+		// the pair's value would have gone.
+		it( 'centres a value with no unit on its own', () => {
+			const svg = buildBoardSvg( groupWith( [ BUS_BOARD.groups[ 0 ].rows[ 0 ] ] ) );
+			const value = textAt( svg, 1812, 'Now' );
+
+			expect( capCentre( value.baseline, value.size ) ).toBeCloseTo( plate( svg ), 0 );
+		} );
+
+		it( 'centres the band text in the band', () => {
+			const svg = buildBoardSvg( groupWith( [ LIVE_ROW ] ) );
+			const heading = svg.match( /<text x="60" y="(\d+)" font-family="[^"]+" font-size="32"/ );
+			const bandTop = Number( svg.match( /<rect x="0" y="(\d+)"/ )[ 1 ] );
+
+			// The band is 58 tall, and both its ends share this baseline.
+			expect( capCentre( Number( heading[ 1 ] ), 32 ) - bandTop ).toBeCloseTo( 29, 0 );
+		} );
 	} );
 
 	describe( 'badges', () => {

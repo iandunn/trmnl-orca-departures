@@ -61,11 +61,32 @@ Direction and name share one baseline through a `<tspan dx>` rather than a secon
 
 **Row height is derived, not a constant — added 2026-08-01 when four rows landed.** `rowMetrics()` in `render/board.js` divides the space between the header and the footer rule by however many departures the board carries, and every size inside a row scales by that one factor. Three things about it are deliberate:
 
-- **It clamps to a 158px ceiling rather than stretching to fill.** A sparse board — one direction, or a stop with two departures left in the day — would otherwise stretch its rows across the whole panel. The accepted eight-row board comes in at 128 and is genuinely scaled; a two-row board hits the ceiling and is not.
+- **It clamps to a 158px ceiling rather than stretching to fill.** A sparse board — one direction, or a stop with two departures left in the day — would otherwise stretch its rows across the whole panel. The accepted eight-row board comes in at 132 and is genuinely scaled; a two-row board hits the ceiling and is not.
 - **Horizontal metrics never scale.** Width is not the constraint, and holding the 152px badge slot fixed is what keeps the destination column in the same place across bus, rail, and any density.
 - **The clamp reserves a 12px gutter above the footer rule.** Without it the densest board that fits lands its bottom edge exactly on the rule and `pm` descenders come within a few pixels of crossing — fitting by arithmetic coincidence, and a later pixel shaved off the header would push them through with every test still passing.
 
 Row count still is **not** configuration. It follows from how many departures the data has, bounded by what fits.
+
+## Everything is centred on a centre line, and centring means cap height — 2026-08-03
+
+Every band the layout has — the header bar, the direction bands, each row, the footer — now places its contents against its own centre line rather than at a measured distance from its top. `capCentredBaseline()` in `render/board.js` is the single expression of that, and `CAP_RATIO = 0.693` is Fira Sans Bold's cap height read off the TTF (693 of 1000 units per em; its lining figures reach the same height, so one ratio does words and numerals alike).
+
+**Cap height, not the em box.** The em box carries ascender and descender padding no glyph on this sign reaches, so type centred on it sits visibly high. This is also why a descender is allowed to hang below the line: `pm` and the `p` of `Departures` read as centred when their *caps* are.
+
+Four things this settled, all judged by rendering and looking rather than by arithmetic alone:
+
+- **The badge numeral and the destination share one baseline**, which is what Metro's signs do — visible in every photograph in `assets/sources/connectpoint-photos/`, and it is what makes a badge and the place it goes read as one statement rather than two columns. It is derived from the destination's **ceiling** size, not its fitted size, so it holds still when `destinationSize()` steps the type down. A baseline that drifted with the longest headsign would break the alignment on exactly the boards that stress the layout. The cost is that a three-character badge sits ~2px below its plate's centre, which is invisible in a 152px plate.
+- **The value and its unit are centred as one block**, not one at a time. Centring the value alone and hanging `min` below it is what the row did before, and it put the pair's mass a fifth of a row below the badge beside it.
+- **A value with no unit — `Now` — is centred on its own.** Both were rendered: keeping the whole column on the paired baseline is perfectly regular and leaves `Now` floating above the badge and destination it belongs to, which is the worse fault. A reader takes a row as one line first and the column as a column second.
+- **`Scheduled` stays outside the centred block**, above the value's cap, because including it would move the value whenever a prediction was not live. It ends up close to the rule above it, which is where the real signs put it too.
+
+The direction bands turned out to be centred already; only the stop code was a pixel off its own heading. `src/render/board.test.js` asserts the *relationships* rather than the offsets, so the next change to row height or type scale does not require rewriting them.
+
+**The footer band is 84px, down from 116.** More white than one line of type asks for, and height the rows could use — the eight-row board gained 4px a row. Do not take it below about 80.
+
+**The "Updated at" stamp went to 42px with the room that freed**, up from 38. It is the sign's only defence against a silently frozen panel and the accepted risk rests on it being readable at a glance, so it is the one thing in the footer that should be larger than the layout strictly needs. Whether 42 is enough is still a judgement at physical size; the band has room for about 52.
+
+**The day and date sit 1580 rather than 1560, measured off a render.** The gap to the clock was about 90px, which read as a hole rather than as two things in one bar. The clock is right-anchored so its left edge moves with the hour: this leaves ~39px at the widest clock the active window contains and ~71px at a single-digit hour. Sized against the tight case. Estimating this got the clock's width wrong by half — scan the ink columns instead, as `.claude/tmp/measure-header.mjs` did.
 
 **Direction wording — decided 2026-08-01. Spell the bearing out, and allow a per-stop override.**
 

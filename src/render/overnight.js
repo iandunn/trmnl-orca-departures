@@ -37,14 +37,21 @@
 
 import { METRO_LOGO_DATA_URI } from '../assets/metro-logo.js';
 import { routeBadge } from '../route-badge.js';
-import { PANEL_HEIGHT, PANEL_WIDTH, text } from './board.js';
+import {
+	FOOTER_BASELINE,
+	FOOTER_RULE_Y,
+	FOOTER_TEXT_SIZE,
+	HEADER_HEIGHT,
+	METRO_LOGO_BOX,
+	PANEL_HEIGHT,
+	PANEL_WIDTH,
+	text,
+} from './board.js';
 
 const INK = '#111';
 const GREY = '#6b6b6b';
 const PAPER = '#fff';
 
-const HEADER_HEIGHT = 102;
-const FOOTER_RULE_Y = 1288;
 const LEFT = 60;
 const RIGHT = 1812;
 
@@ -120,6 +127,11 @@ function metroLogo( x, y, width ) {
 	return `<image href="${ METRO_LOGO_DATA_URI }" x="${ round( x ) }" y="${ round( y ) }" width="${ round( width ) }" height="${ round( width * LOGO_RATIO ) }"/>`;
 }
 
+/** The logo in the header bar, in the board's own slot, so the two headers line up. */
+function headerLogo() {
+	return metroLogo( METRO_LOGO_BOX.x, METRO_LOGO_BOX.y, METRO_LOGO_BOX.width );
+}
+
 /**
  * The header bar, carrying the Metro logo and nothing else.
  *
@@ -130,7 +142,7 @@ function metroLogo( x, y, width ) {
 function header( right = '' ) {
 	return (
 		`<rect width="${ PANEL_WIDTH }" height="${ HEADER_HEIGHT }" fill="${ INK }"/>` +
-		metroLogo( 56, 16, 164 ) +
+		headerLogo() +
 		right
 	);
 }
@@ -159,7 +171,9 @@ function headerRule( stroke ) {
 function footer( label, ink = GREY, rule = '#c0c0c0' ) {
 	return (
 		`<line x1="0" y1="${ FOOTER_RULE_Y }" x2="${ PANEL_WIDTH }" y2="${ FOOTER_RULE_Y }" stroke="${ rule }" stroke-width="2"/>` +
-		( label ? text( LEFT, 1362, 38, `Wakes at ${ label }`, { weight: 400, fill: ink } ) : '' )
+		( label
+			? text( LEFT, FOOTER_BASELINE, FOOTER_TEXT_SIZE, `Wakes at ${ label }`, { weight: 400, fill: ink } )
+			: '' )
 	);
 }
 
@@ -251,7 +265,7 @@ function rowDestination( { resumeClock, resumeMeridiem } ) {
 function rowScheduledInverse( { resumeClock, resumeMeridiem } ) {
 	return panel(
 		INK,
-		metroLogo( 56, 16, 164 ) +
+		headerLogo() +
 			headerRule( '#3a3a3a' ) +
 			// Above the row, which spans the full width and has nowhere to hide a star.
 			nightSky( CENTRE_Y - 200, SKY_ABOVE ) +
@@ -393,7 +407,7 @@ function firstDeparturesInverseMoon( { rows = [] } ) {
 
 	return panel(
 		INK,
-		metroLogo( 56, 16, 164 ) +
+		headerLogo() +
 			headerRule( '#3a3a3a' ) +
 			nightSky( plateCentre, sky ) +
 			moonBadge( CENTRE_X, plateCentre, plateWidth, PAPER, INK ) +
@@ -413,7 +427,7 @@ function firstDeparturesInverseMoon( { rows = [] } ) {
 function firstDeparturesInverse( { resumeLabel, rows = [] } ) {
 	return panel(
 		INK,
-		metroLogo( 56, 16, 164 ) +
+		headerLogo() +
 			headerRule( '#3a3a3a' ) +
 			moonBadge( CENTRE_X, TOMORROW_PLATE_CENTRE, TOMORROW_PLATE_WIDTH, PAPER, INK ) +
 			tomorrowBand( TOMORROW_BAND_Y, { fill: '#2c2c2c', ink: PAPER } ) +
@@ -475,7 +489,7 @@ function badgeMoonInverse( { resumeLabel } ) {
 		INK,
 		// No header bar — the panel is already ink — but the rule stays, because it is the bar's own
 		// bottom edge and without it the logo floats rather than sitting in a header.
-		metroLogo( 56, 16, 164 ) +
+		headerLogo() +
 			headerRule( '#3a3a3a' ) +
 			moonBadge( CENTRE_X, CENTRE_Y, 620, PAPER, INK ) +
 			footer( resumeLabel, '#9a9a9a', '#3a3a3a' )
@@ -546,7 +560,7 @@ function nightSky( cy = CENTRE_Y, stars = SKY_AROUND ) {
 function badgeMoonInverseStars( { resumeLabel } ) {
 	return panel(
 		INK,
-		metroLogo( 56, 16, 164 ) +
+		headerLogo() +
 			headerRule( '#3a3a3a' ) +
 			nightSky() +
 			moonBadge( CENTRE_X, CENTRE_Y, 620, PAPER, INK ) +
@@ -581,7 +595,7 @@ function logoPlate( { resumeLabel } ) {
 function logoPlateInverse( { resumeLabel } ) {
 	return panel(
 		INK,
-		metroLogo( 56, 16, 164 ) +
+		headerLogo() +
 			headerRule( '#3a3a3a' ) +
 			logoOnPlate( 900, '#4a4a4a' ) +
 			footer( resumeLabel, '#9a9a9a', '#3a3a3a' )
@@ -592,7 +606,7 @@ function logoPlateInverse( { resumeLabel } ) {
 function logoPlateInverseWhite( { resumeLabel } ) {
 	return panel(
 		INK,
-		metroLogo( 56, 16, 164 ) +
+		headerLogo() +
 			headerRule( '#3a3a3a' ) +
 			logoOnPlate( 900, PAPER ) +
 			footer( resumeLabel, '#9a9a9a', '#3a3a3a' )
