@@ -215,6 +215,24 @@ function panel( { title, tooltip = '', error = '', bodyHtml } ) {
 	);
 }
 
+/**
+ * A block nested inside a panel, one heading level down.
+ *
+ * Exists so the per-device readings can sit inside a device box without nesting `<section
+ * class="panel">` in itself, which would double the chrome and put an `<h2>` under an `<h2>`.
+ */
+function subsection( { title, tooltip = '', error = '', bodyHtml } ) {
+	const tooltipAttribute = tooltip ? ` title="${ escapeHtml( tooltip ) }"` : '';
+
+	return (
+		'<section class="subpanel">' +
+		`<h3${ tooltipAttribute }>${ escapeHtml( title ) }</h3>` +
+		( error ? queryFailed( error ) : '' ) +
+		bodyHtml +
+		'</section>'
+	);
+}
+
 function note( text ) {
 	return `<p class="note">${ escapeHtml( text ) }</p>`;
 }
@@ -557,27 +575,32 @@ function outcomesSection( outcomes ) {
 }
 
 /**
- * The flicker rate, and the refresh rate the device believes in.
+ * How often this device repainted, and the refresh rate it believes in.
  *
  * `Image-Cached` is the most important number on the page after the identity panel: the whole design
  * bets on the `filename` cache no-op, because the X takes a full-panel refresh every time a changed
- * image reaches it. A cache-hit rate near zero means the filename is churning and the sign is
- * flashing on every poll.
+ * image reaches it.
+ *
+ * **It is a repaint count, not a health score, and the difference decides how to read a low rate.** A
+ * miss means the board really did change, which during the day it does most minutes — so a low rate
+ * is what live departures look like. The failure it exposes is the rate falling while the board is
+ * *static*: that is the filename churning, and it flashes the panel for nothing.
  */
-function panelHealthSection( panelData ) {
-	const cachedTotal = panelData.imageCached.reduce( ( sum, row ) => sum + row.count, 0 );
+function repaintsFor( panelData, deviceId ) {
+	const cached = panelData.imageCached.filter( ( row ) => row.deviceId === deviceId );
+	const cachedTotal = cached.reduce( ( sum, row ) => sum + row.count, 0 );
 
-	const cachedCount = panelData.imageCached
+	const cachedCount = cached
 		.filter( ( row ) => CACHED_HEADER_VALUES.has( String( row.imageCached ).trim().toLowerCase() ) )
 		.reduce( ( sum, row ) => sum + row.count, 0 );
 
 	const cachedMetric =
 		cachedTotal === 0
-			? emptyState( panelData.imageCachedError, 'no device wakes yet, so nothing has reported a cache result' )
+			? emptyState( panelData.imageCachedError, 'this device has not reported a cache result yet' )
 			: `<p class="metric"><strong>${ escapeHtml( formatPercent( shareOf( cachedCount, cachedTotal ) ) ) }</strong>` +
 				'<span>of wakes skipped the download, and so did not repaint the panel</span></p>';
 
-	const cachedRows = panelData.imageCached.map( ( row ) =>
+	const cachedRows = cached.map( ( row ) =>
 		barRow( {
 			label: CACHED_HEADER_VALUES.has( String( row.imageCached ).trim().toLowerCase() )
 				? `cached (${ row.imageCached })`
@@ -588,9 +611,10 @@ function panelHealthSection( panelData ) {
 		} )
 	);
 
-	const echoTotal = panelData.refreshEcho.reduce( ( sum, row ) => sum + row.count, 0 );
+	const echo = panelData.refreshEcho.filter( ( row ) => row.deviceId === deviceId );
+	const echoTotal = echo.reduce( ( sum, row ) => sum + row.count, 0 );
 
-	const echoRows = panelData.refreshEcho.map( ( row ) => {
+	const echoRows = echo.map( ( row ) => {
 		const seconds = toNumber( row.refreshRateEcho );
 		const hotLoop = seconds === 0;
 
@@ -605,18 +629,25 @@ function panelHealthSection( panelData ) {
 	} );
 
 	return (
-		panel( {
-			title: 'Panel health',
+		subsection( {
+			title: 'Panel repaints',
+
+			// **Not "panel health".** A miss is the correct outcome when the board actually changed, and
+			// during the day it changes most minutes, so a low rate is what live departures look like
+			// rather than a fault. What would be a fault is the rate collapsing while the board is
+			// static — that is the filename churning, and it flashes the panel for nothing.
 			tooltip:
-				'The Image-Cached header reports the outcome of the *previous* wake, not the one carrying ' +
-				'it, so read the rate rather than any single row.',
+				'How often the device skipped the download because `filename` was unchanged, which is how ' +
+				'often it did not repaint. A miss is expected whenever the departures actually changed. ' +
+				'The Image-Cached header reports the *previous* wake, not the one carrying it, so read the ' +
+				'rate rather than any single row.',
 			error: panelData.imageCachedError,
 
 			// The bar list is suppressed when there is nothing to chart, because its own empty state
 			// would otherwise print a bare "none" directly under a sentence that already explained why.
 			bodyHtml: cachedMetric + ( cachedTotal === 0 ? '' : barList( cachedRows ) ),
 		} ) +
-		panel( {
+		subsection( {
 			title: 'Refresh rate echo',
 			tooltip:
 				'What the device read back out of NVS. A value of 0 is the hot-loop bug: the device sleeps ' +
@@ -624,93 +655,172 @@ function panelHealthSection( panelData ) {
 			error: panelData.refreshEchoError,
 			bodyHtml: echoRows.length
 				? barList( echoRows )
-				: emptyState( panelData.refreshEchoError, 'no device has reported a refresh rate yet' ),
+				: emptyState( panelData.refreshEchoError, 'this device has not reported a refresh rate yet' ),
 		} )
 	);
 }
 
 /**
- * The battery chart.
+ * How this device has held up over the window: charge, and WiFi signal, one chart each.
+ *
+ * **Deliberately no "latest reading" line.** The facts above already print charge, voltage and RSSI
+ * from the device's own last poll, and repeating them here produced two different numbers for the
+ * same thing in one box — the facts come from the latest raw poll, these buckets are six-hour
+ * averages. The shape over time is the one thing the facts cannot show, so that is all this draws.
  *
  * -1 is the firmware's own value for a fuel gauge that failed to initialise, and it is also what
  * `src/stats/schema.js` writes for an absent header. Plotting it would put a point far below the
  * axis and drag the whole line flat, so those points are dropped from the series rather than
  * clamped — a gap in the line is honest about a missing reading in a way that a 0 is not.
  */
-function batterySection( battery ) {
-	const usable = battery.series.filter( ( point ) => toNumber( point.percent ) > ABSENT_NUMBER );
-	const latest = battery.series[ battery.series.length - 1 ];
+function trendsFor( battery, deviceId ) {
+	const series = battery.series.filter( ( point ) => point.deviceId === deviceId );
+	const charge = series.filter( ( point ) => toNumber( point.percent ) > ABSENT_NUMBER );
 
-	const reading = ( value, suffix ) => {
-		const number = toNumber( value );
-
-		return number <= ABSENT_NUMBER ? 'no data' : `${ number.toFixed( suffix === 'V' ? 2 : 0 ) } ${ suffix }`;
-	};
-
-	// WiFi signal rides in the same panel because it comes from the same place — one header per poll,
-	// only meaningful as a trend. It is the earliest warning this sign can produce: the device goes
-	// quiet long after its signal starts degrading, so a number sagging over a week is the only lead
-	// time there is. Sitting beside the charge is the point; both are "how is the device holding up".
 	// **Strict inequality against the sentinel, not `< 0`.** RSSI is legitimately negative — a healthy
 	// reading is around -58 dBm — so sign says nothing about whether a value is present, and the
 	// absent marker is exactly -1. Same trap `logReading()` below documents for the device-log copy.
-	const strength = latest ? toNumber( latest.signal ) : ABSENT_NUMBER;
-	const signal = strength < ABSENT_NUMBER ? `, ${ escapeHtml( `${ strength.toFixed( 0 ) } dBm` ) } WiFi` : '';
+	const signal = series.filter( ( point ) => toNumber( point.signal ) < ABSENT_NUMBER );
 
-	const summary = latest
-		? `<p class="metric"><strong>${ escapeHtml( reading( latest.percent, '%' ) ) }</strong>` +
-			`<span>latest charge, ${ escapeHtml( reading( latest.voltage, 'V' ) ) }${ signal }, ` +
-			`as of ${ escapeHtml( latest.bucket ) }</span></p>`
-		: emptyState( battery.error, 'no device wakes yet, so nothing has reported a battery reading' );
-
-	const excluded = battery.series.length - usable.length;
+	const excluded = series.length - charge.length;
 
 	const excludedNote =
 		excluded > 0
 			? note(
-					`${ excluded } of ${ battery.series.length } buckets reported no charge reading and are ` +
+					`${ excluded } of ${ series.length } buckets reported no charge reading and are ` +
 						'left out of the chart rather than plotted as -1.'
 			  )
 			: '';
 
-	return panel( {
-		title: 'Battery',
-		error: battery.error,
+	return (
+		subsection( {
+			title: 'Charge over time',
+			tooltip:
+				'The slope is the reading, not any single point: it is the only thing here that answers ' +
+				'how long the sign runs between charges.',
+			error: battery.error,
+			bodyHtml: charge.length
+				? trendChart( {
+						points: charge,
+						valueOf: ( point ) => toNumber( point.percent ),
+						min: 0,
+						max: 100,
+						format: ( value ) => `${ value }%`,
+						caption: 'Battery charge',
+				  } ) + excludedNote
+				: emptyState( battery.error, 'this device has not reported a battery reading yet' ),
+		} ) +
+		// Its own subsection rather than a second line on the charge chart: the two share no unit and
+		// no range, so one axis could only serve them by lying about one of them.
+		subsection( {
+			title: 'WiFi signal over time',
+			tooltip:
+				'The device goes quiet long after its signal starts degrading, so a line sagging over a ' +
+				'week is the only lead time there is. -30 dBm is excellent, -90 dBm is barely connected.',
 
-		// Same reason as the cache bars above: with no series at all, `summary` has already said so, and
-		// the chart's own empty state would repeat it as a bare "none".
-		bodyHtml: summary + ( battery.series.length === 0 ? '' : batteryChart( usable ) + excludedNote ),
-	} );
+			// The error is reported once, on the subsection above — both charts come from the same query,
+			// and printing the same failure twice in one box reads as two things having gone wrong.
+			bodyHtml: signal.length
+				? trendChart( {
+						points: signal,
+						valueOf: ( point ) => toNumber( point.signal ),
+						min: -90,
+						max: -30,
+						format: ( value ) => `${ value } dBm`,
+						caption: 'WiFi signal',
+				  } )
+				: emptyState( battery.error, 'this device has not reported a WiFi signal reading yet' ),
+		} )
+	);
 }
 
-function batteryChart( usable ) {
-	if ( usable.length === 0 ) {
+/**
+ * A labelled line chart.
+ *
+ * **The axis labels are HTML, not SVG text.** The plot is stretched to its container with
+ * `preserveAspectRatio="none"`, which distorts any glyph inside it — so the ticks are positioned
+ * beside the plot instead, at the same percentages the gridlines use.
+ */
+function trendChart( { points, valueOf, min, max, format, caption } ) {
+	if ( points.length === 0 ) {
 		return none();
 	}
 
-	const points = usable.map( ( point, index ) => {
+	const span = max - min;
+
+	const plotted = points.map( ( point, index ) => {
 		// A single reading has no span to spread across, so it sits in the middle rather than dividing
 		// by zero.
-		const x = usable.length === 1 ? CHART_WIDTH / 2 : ( index / ( usable.length - 1 ) ) * CHART_WIDTH;
-		const y = CHART_HEIGHT - ( Math.min( 100, Math.max( 0, toNumber( point.percent ) ) ) / 100 ) * CHART_HEIGHT;
+		const x = points.length === 1 ? CHART_WIDTH / 2 : ( index / ( points.length - 1 ) ) * CHART_WIDTH;
+		const clamped = Math.min( max, Math.max( min, valueOf( point ) ) );
+		const y = CHART_HEIGHT - ( ( clamped - min ) / span ) * CHART_HEIGHT;
 
 		return `${ x.toFixed( 1 ) },${ y.toFixed( 1 ) }`;
 	} );
 
-	const gridlines = [ 0, 50, 100 ].map( ( level ) => {
-		const y = ( CHART_HEIGHT - ( level / 100 ) * CHART_HEIGHT ).toFixed( 1 );
+	const levels = [ max, min + span / 2, min ];
 
-		return `<line x1="0" y1="${ y }" x2="${ CHART_WIDTH }" y2="${ y }" class="grid"></line>`;
+	const gridlines = levels
+		.map( ( level ) => {
+			const y = ( CHART_HEIGHT - ( ( level - min ) / span ) * CHART_HEIGHT ).toFixed( 1 );
+
+			return `<line x1="0" y1="${ y }" x2="${ CHART_WIDTH }" y2="${ y }" class="grid"></line>`;
+		} )
+		.join( '' );
+
+	const ticks = levels
+		.map( ( level, index ) => {
+			const top = [ '0', '50%', '100%' ][ index ];
+
+			return `<span class="y-tick" style="top:${ top }">${ escapeHtml( format( level ) ) }</span>`;
+		} )
+		.join( '' );
+
+	const first = points[ 0 ].bucket;
+	const last = points[ points.length - 1 ].bucket;
+	const label = `${ caption } over ${ points.length } buckets, from ${ first } to ${ last }`;
+
+	// Five dated ticks rather than only the two ends, because "somewhere between 28 July and 26
+	// October" is not enough to read a slope against. The leftmost keeps its year and the rest drop to
+	// `MM-DD`: the year is established once, and repeating it five times crowds the axis at the widths
+	// this page is read at.
+	const tickCount = Math.min( 5, points.length );
+	const fractionAt = ( position ) => ( tickCount === 1 ? 0.5 : position / ( tickCount - 1 ) );
+
+	const xTicks = Array.from( { length: tickCount }, ( unused, position ) => {
+		const fraction = fractionAt( position );
+		const bucket = points[ Math.round( fraction * ( points.length - 1 ) ) ].bucket;
+		const text = position === 0 ? bucket.slice( 0, 10 ) : bucket.slice( 5, 10 );
+
+		// The end labels are pulled inside the plot rather than centred on it, so neither hangs off the
+		// edge of the panel.
+		const shift = position === 0 ? '0' : position === tickCount - 1 ? '-100%' : '-50%';
+
+		return (
+			`<span class="x-tick" style="left:${ ( fraction * 100 ).toFixed( 2 ) }%;` +
+			`transform:translateX(${ shift })">${ escapeHtml( text ) }</span>`
+		);
 	} ).join( '' );
 
-	const label = `charge over ${ usable.length } buckets, from ${ usable[ 0 ].bucket } to ${ usable[ usable.length - 1 ].bucket }`;
+	const xGridlines = Array.from( { length: tickCount }, ( unused, position ) => {
+		const x = ( fractionAt( position ) * CHART_WIDTH ).toFixed( 1 );
 
+		return `<line x1="${ x }" y1="0" x2="${ x }" y2="${ CHART_HEIGHT }" class="grid"></line>`;
+	} ).join( '' );
+
+	// `caption` is the accessible name only. The subsection heading above already says what this
+	// charts, and printing it twice was two labels for one line.
 	return (
+		'<figure class="trend">' +
+		`<div class="plot">${ ticks }` +
 		`<svg class="chart" viewBox="0 0 ${ CHART_WIDTH } ${ CHART_HEIGHT }" preserveAspectRatio="none" ` +
 		`role="img" aria-label="${ escapeHtml( label ) }">` +
 		gridlines +
-		`<polyline class="series" points="${ points.join( ' ' ) }"></polyline>` +
-		'</svg>'
+		xGridlines +
+		`<polyline class="series" points="${ plotted.join( ' ' ) }"></polyline>` +
+		'</svg></div>' +
+		`<div class="x-axis"><div class="x-track">${ xTicks }</div></div>` +
+		'</figure>'
 	);
 }
 
@@ -807,23 +917,33 @@ function signalIcon( rssi ) {
  * Grouped from the most recent authenticated polls, so each box is that device's *current* state
  * rather than an average over the window.
  */
-function devicesSection( devices ) {
+function devicesSection( devices, panelData, battery ) {
 	if ( devices.error ) {
 		return panel( { title: 'Devices', error: devices.error, bodyHtml: '' } );
 	}
 
 	if ( devices.rows.length === 0 ) {
+		// **The query errors have to be repeated here.** Repaints, refresh echo and charge are
+		// drawn inside device boxes, so with no boxes there is nowhere for their failures to appear —
+		// and a failed query rendered nowhere is indistinguishable from a device that has not polled.
+		// That is the same trap `emptyState()` exists for, one level up.
+		const strandedErrors = [ panelData.imageCachedError, panelData.refreshEchoError, battery.error ]
+			.filter( Boolean )
+			.map( queryFailed )
+			.join( '' );
+
 		return panel( {
 			title: 'Devices',
 			tooltip: 'One box per physical device, from the MAC address the firmware sends as `ID`.',
 			bodyHtml:
+				strandedErrors +
 				'<p class="none">no device has polled yet. A box appears here on the first request ' +
 				'carrying device headers — an authenticated request without them, such as a hand-made ' +
 				'curl, is counted elsewhere but is deliberately not a device</p>',
 		} );
 	}
 
-	return devices.rows.map( deviceBox ).join( '' );
+	return devices.rows.map( ( device ) => deviceBox( device, panelData, battery ) ).join( '' );
 }
 
 /** A `-1` numeric reading as words, so an absent sensor never renders as a plausible value. */
@@ -842,7 +962,28 @@ function deviceFlag( value ) {
 	return String( value ?? '' ).trim() === '' ? 'not reported' : value;
 }
 
-function deviceBox( device ) {
+/**
+ * The rows in a device box the server worked out for itself, rather than believing.
+ *
+ * **Listed as the exception because the safe default is the other way round.** Almost everything the
+ * page knows about a device arrives in a request header, and a header is whatever the caller typed —
+ * including the MAC address the whole per-device split is keyed on. Someone replaying this sign's URL
+ * can send its MAC and merge silently into its box, so a single calm device box is not evidence of a
+ * single device. That is why the identity alarms above key on network and firmware instead.
+ *
+ * Marking the observed rows rather than the claimed ones means a row added later is treated as
+ * spoofable until someone decides otherwise, which is the direction that fails safely.
+ */
+const OBSERVED_DEVICE_FACTS = new Set( [
+	'IP address',
+	'Network',
+	'Last seen',
+	'Last request',
+	'Last screen served',
+	'Upstream on that poll',
+] );
+
+function deviceBox( device, panelData, battery ) {
 	const rssi = toNumber( device.signal );
 
 	const facts = [
@@ -896,15 +1037,28 @@ function deviceBox( device ) {
 	// escaped here, which is the rule this file exists to keep: a device sends its own model string
 	// and firmware version, and both land in the owner's browser.
 	const rows = facts
-		.map( ( [ label, value, raw ] ) =>
-			`<div class="fact"><dt>${ escapeHtml( label ) }</dt><dd>${ raw ? value : escapeHtml( value ) }</dd></div>`
-		)
+		.map( ( [ label, value, raw ] ) => {
+			const tell = OBSERVED_DEVICE_FACTS.has( label ) ? '' : '<span class="tell">*</span>';
+
+			return (
+				`<div class="fact"><dt>${ escapeHtml( label ) }${ tell }</dt>` +
+				`<dd>${ raw ? value : escapeHtml( value ) }</dd></div>`
+			);
+		} )
 		.join( '' );
+
+	const claimedNote =
+		'<p class="claimed">* Self-reported by the device in a request header, so anyone holding the URL ' +
+		'for this sign can claim any of it, a matching MAC address included. The unmarked rows are ' +
+		'observed by the server rather than taken on trust.</p>';
 
 	return panel( {
 		title: `Device ${ device.deviceId || '(no ID header)' }`,
-		tooltip: 'Everything this device reported on its most recent authenticated poll.',
-		bodyHtml: `<dl class="facts">${ rows }</dl>`,
+		tooltip: 'This device: its last poll, and its readings across the window.',
+		bodyHtml:
+			`<dl class="facts">${ rows }</dl>${ claimedNote }` +
+			repaintsFor( panelData, device.deviceId ) +
+			trendsFor( battery, device.deviceId ),
 	} );
 }
 
@@ -1206,6 +1360,24 @@ const STYLES =
 	'.facts{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 24px}' +
 	'.fact dt{font-size:12px;color:#8a8a8a;margin:0 0 2px}' +
 	'.fact dd{margin:0;font-variant-numeric:tabular-nums;display:flex;align-items:center;gap:8px}' +
+	'.fact dt .tell{margin-left:2px;color:#b0b0b0}' +
+	'.claimed{margin:14px 0 0;font-size:12px;font-style:italic;color:#8a8a8a;line-height:1.5}' +
+	'.subpanel{margin:18px 0 0;padding:16px 0 0;border-top:1px solid var(--line)}' +
+	'.subpanel h3{margin:0 0 10px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}' +
+	'.trend{margin:0}' +
+	'.trend figcaption{font-size:12px;color:var(--muted);margin:0 0 6px}' +
+	// The y-gutter is wide enough for the longest tick a chart here produces (`-90 dBm`) and the ticks
+	// never wrap, because a wrapped label stops being vertically centred on the gridline it labels.
+	'.trend .plot{position:relative;padding-left:64px}' +
+	'.trend .y-tick{position:absolute;left:0;width:56px;text-align:right;font-size:11px;white-space:nowrap;' +
+	'color:var(--muted);transform:translateY(-50%);font-variant-numeric:tabular-nums}' +
+	// The ticks are positioned inside `.x-track` rather than against `.x-axis`, because a percentage
+	// `left` resolves against the padding box — measured from the panel edge, it would sit the whole
+	// axis 64px left of the plot it labels.
+	'.trend .x-axis{padding-left:64px;margin-top:5px;font-size:11px;color:var(--muted);' +
+	'font-variant-numeric:tabular-nums}' +
+	'.trend .x-track{position:relative;height:14px}' +
+	'.trend .x-tick{position:absolute;top:0;white-space:nowrap}' +
 	'.signal{flex:none;vertical-align:middle}' +
 	'.check{display:flex;gap:10px;align-items:flex-start;padding:10px;border-radius:5px;' +
 	'border:1px solid var(--line)}' +
@@ -1250,11 +1422,9 @@ export function renderStatsHtml( data ) {
 		( data.errorMessage ? `<p class="banner error">${ escapeHtml( `query failed: ${ data.errorMessage }` ) }</p>` : '' ) +
 		( showEmptyBanner ? emptyBanner( data.rangeLabel ) : '' ) +
 		identitySection( data.identity ) +
-		devicesSection( data.devices ) +
+		devicesSection( data.devices, data.panel, data.battery ) +
 		totalsSection( data.totals ) +
 		outcomesSection( data.outcomes ) +
-		panelHealthSection( data.panel ) +
-		batterySection( data.battery ) +
 		renderOutcomesSection( data.renderOutcomes ) +
 		upstreamReasonsSection( data.upstreamReasons ) +
 		deviceLogsSection( data.deviceLogs ) +
@@ -1319,6 +1489,94 @@ export function buildUnpairedMockStatsData( rangeKey ) {
 	};
 }
 
+/**
+ * The one device in the mock.
+ *
+ * Named rather than repeated, because the per-device panels join on it: a typo in any one copy would
+ * render a device box with every reading missing, which is a real state and so would not look wrong.
+ */
+const MOCK_DEVICE_ID = 'A4:CF:12:9B:7E:03';
+
+/** The last six-hour bucket the mock telemetry ends on, fixed so every render is identical. */
+const MOCK_SERIES_END_MS = Date.UTC( 2026, 6, 31, 18, 0, 0 );
+
+const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * Six-hourly telemetry for the mock device, shaped like the real thing rather than like a demo.
+ *
+ * **Deterministic, and that is why the noise is arithmetic rather than `Math.random()`.** A series
+ * that changed per run would make every test rendering the mock flaky. It still has to *be* noise: a
+ * smooth line makes the preview look like the charts work when what they have to survive is jitter,
+ * dropouts and a recharge.
+ *
+ * **The two series are deliberately different shapes, because they are different phenomena.**
+ *
+ * - **Charge sawtooths.** It falls slowly and jumps back to full when someone plugs the sign in, so
+ *   a long window contains a recharge rather than one clean slope.
+ * - **Signal is flat and noisy.** A sign screwed to a wall does not drift away from its router: RSSI
+ *   sits around a baseline and occasionally craters when something interferes. The first version of
+ *   this mock sloped it downward in lockstep with the battery, which is not what the hardware does
+ *   and taught exactly the wrong reading of the chart.
+ *
+ * Generates the full 90 days that Analytics Engine retains; the caller slices the tail to whatever
+ * range is selected, exactly as the `WHERE timestamp > NOW() - INTERVAL` in the real query does. So a
+ * short window is the *recent* end of this history rather than a differently-shaped series, and it
+ * legitimately may not contain the recharge.
+ */
+function mockTelemetry() {
+	const buckets = 90 * 4;
+
+	// A fixed hash of the bucket index. `salt` gives each series its own uncorrelated sequence, so
+	// charge and signal do not dip in the same places.
+	const noise = ( index, salt ) => {
+		const value = Math.sin( ( index + 1 ) * salt ) * 43758.5453;
+
+		return value - Math.floor( value );
+	};
+
+	let percent = 100;
+
+	return Array.from( { length: buckets }, ( unused, index ) => {
+		const bucket = new Date( MOCK_SERIES_END_MS - ( buckets - 1 - index ) * SIX_HOURS_MS )
+			.toISOString()
+			.replace( 'T', ' ' )
+			.slice( 0, 19 );
+
+		percent -= 0.3 + noise( index, 12.9898 ) * 0.25;
+
+		if ( percent < 12 ) {
+			percent = 100;
+		}
+
+		// A bucket the device reported nothing in. Every ninth rather than randomly, so the shortest
+		// range still contains one and the test that counts them is not a coin toss.
+		if ( index % 9 === 4 ) {
+			return {
+				deviceId: MOCK_DEVICE_ID,
+				bucket,
+				voltage: ABSENT_NUMBER,
+				percent: ABSENT_NUMBER,
+				signal: ABSENT_NUMBER,
+			};
+		}
+
+		// Whether a bucket craters is itself noise, not `index % 17`. A fixed cadence draws a visibly
+		// periodic comb, and interference does not arrive on a timetable.
+		const interference = noise( index, 91.7743 ) > 0.87;
+
+		return {
+			deviceId: MOCK_DEVICE_ID,
+			bucket,
+			voltage: Number( ( 3.3 + ( percent / 100 ) * 0.85 ).toFixed( 2 ) ),
+			percent: Math.round( percent ),
+			signal: Math.round(
+				interference ? -72 - noise( index, 4.1414 ) * 14 : -58 + ( noise( index, 78.233 ) - 0.5 ) * 8
+			),
+		};
+	} );
+}
+
 export function buildMockStatsData( rangeKey ) {
 	const range = resolveRange( rangeKey );
 	const injection = '<img src=x onerror=alert(1)>';
@@ -1332,7 +1590,10 @@ export function buildMockStatsData( rangeKey ) {
 	// entry that is genuinely clipped says so by overriding it.
 	const logEntry = ( entry ) => ( { messageBytes: byteLength( entry.message ), ...entry } );
 
-	return {
+	// The literals below describe the default 14-day window. `scaleMockVolumes()` stretches them to
+	// whatever range is selected, so the picker moves every number on the page rather than only the
+	// charts — a picker that visibly does nothing is the preview lying about what the page does.
+	const mock = {
 		range: range.key,
 		rangeLabel: range.label,
 		rangeDays: range.days,
@@ -1408,34 +1669,27 @@ export function buildMockStatsData( rangeKey ) {
 
 		panel: {
 			imageCached: [
-				{ imageCached: 'true', count: 16510, lastSeen: '2026-07-31 22:04:11' },
-				{ imageCached: 'false', count: 2592, lastSeen: '2026-07-31 21:58:02' },
+				{ deviceId: MOCK_DEVICE_ID, imageCached: 'true', count: 16510, lastSeen: '2026-07-31 22:04:11' },
+				{ deviceId: MOCK_DEVICE_ID, imageCached: 'false', count: 2592, lastSeen: '2026-07-31 21:58:02' },
 			],
 			imageCachedError: '',
 			refreshEcho: [
-				{ refreshRateEcho: '60', count: 12880, lastSeen: '2026-07-31 22:04:11' },
-				{ refreshRateEcho: '900', count: 6210, lastSeen: '2026-07-31 05:14:00' },
-				{ refreshRateEcho: '0', count: 12, lastSeen: '2026-07-29 03:22:17' },
+				{ deviceId: MOCK_DEVICE_ID, refreshRateEcho: '60', count: 12880, lastSeen: '2026-07-31 22:04:11' },
+				{ deviceId: MOCK_DEVICE_ID, refreshRateEcho: '900', count: 6210, lastSeen: '2026-07-31 05:14:00' },
+				{ deviceId: MOCK_DEVICE_ID, refreshRateEcho: '0', count: 12, lastSeen: '2026-07-29 03:22:17' },
 			],
 			refreshEchoError: '',
 		},
 
 		battery: {
-			series: [
-				{ bucket: '2026-07-28 00:00:00', voltage: 4.02, percent: 92, signal: -54 },
-				{ bucket: '2026-07-28 06:00:00', voltage: 3.98, percent: 88, signal: -57 },
-				{ bucket: '2026-07-28 12:00:00', voltage: ABSENT_NUMBER, percent: ABSENT_NUMBER, signal: ABSENT_NUMBER },
-				{ bucket: '2026-07-28 18:00:00', voltage: 3.91, percent: 81, signal: -61 },
-				{ bucket: '2026-07-29 00:00:00', voltage: 3.86, percent: 74, signal: -66 },
-				{ bucket: '2026-07-29 06:00:00', voltage: 3.82, percent: 69, signal: -68 },
-			],
+			series: mockTelemetry(),
 			error: '',
 		},
 
 		devices: {
 			rows: [
 				{
-					deviceId: 'A4:CF:12:9B:7E:03',
+					deviceId: MOCK_DEVICE_ID,
 					lastSeen: '2026-07-31 22:04:11',
 					model: 'x',
 					firmwareVersion: '1.7.2',
@@ -1618,6 +1872,66 @@ export function buildMockStatsData( rangeKey ) {
 				} ),
 			],
 			entriesError: '',
+		},
+	};
+
+	return scaleMockVolumes( mock, range.days );
+}
+
+/**
+ * Stretches the mock's volumes to the selected range, and trims its telemetry to the same window.
+ *
+ * **Rates scale; discrete events do not.** A fortnight's worth of polls really is twice a week's, so
+ * every `count` answering "how often" is multiplied. `setupCalls` and the enrollment rows are not:
+ * three enrolments happened, and scaling them would claim six on a 30-day view and one on a 7-day
+ * one, which is a different statement rather than the same one over a longer window. The
+ * recent-rejection, configuration-error and device-log tables are lists of individual rows, for the
+ * same reason.
+ *
+ * The floor of 1 keeps a row that exists from rendering as a zero on a short range, since the whole
+ * content of those rows is that the thing happened at all.
+ */
+function scaleMockVolumes( data, days ) {
+	const factor = days / 14;
+	const scale = ( value ) => Math.max( 1, Math.round( value * factor ) );
+	const scaleRows = ( rows ) => rows.map( ( row ) => ( { ...row, count: scale( row.count ) } ) );
+
+	return {
+		...data,
+
+		totals: {
+			total: scale( data.totals.total ),
+			authorized: scale( data.totals.authorized ),
+			rejected: scale( data.totals.rejected ),
+		},
+
+		outcomes: scaleRows( data.outcomes ),
+
+		identity: {
+			...data.identity,
+			networks: scaleRows( data.identity.networks ),
+			firmware: scaleRows( data.identity.firmware ),
+			authorizedRequests: scale( data.identity.authorizedRequests ),
+		},
+
+		panel: {
+			...data.panel,
+			imageCached: scaleRows( data.panel.imageCached ),
+			refreshEcho: scaleRows( data.panel.refreshEcho ),
+		},
+
+		// The tail of the 90-day history, which is what the real query's `WHERE timestamp > NOW() -
+		// INTERVAL` returns: a short window is the recent end of the same series, not a new one.
+		battery: { ...data.battery, series: data.battery.series.slice( -Math.max( 8, days * 4 ) ) },
+
+		renderOutcomes: { ...data.renderOutcomes, rows: scaleRows( data.renderOutcomes.rows ) },
+		upstreamReasons: { ...data.upstreamReasons, rows: scaleRows( data.upstreamReasons.rows ) },
+		deviceLogs: { ...data.deviceLogs, levels: scaleRows( data.deviceLogs.levels ) },
+
+		rejections: {
+			...data.rejections,
+			sources: scaleRows( data.rejections.sources ),
+			probePaths: scaleRows( data.rejections.probePaths ),
 		},
 	};
 }

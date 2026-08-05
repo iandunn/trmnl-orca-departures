@@ -32,9 +32,29 @@ The cost of the throw is worth knowing: if an over-long schema ever did ship, mo
 - **Gated on `identifiesADevice()`** — an `ID` or `Model` header, either alone. The setup-logo download sends no headers at all, and a row for it would be eighteen empty columns claiming a device reported nothing.
 - **`upstreamReason` lives here**, not on the request row. An upstream failure only ever happens on a device poll.
 - **The request schema was cut back to its original 20**, which is a deletion of slots with *no history behind them* rather than the reorder the append-only rule forbids: `blob21`+ were never successfully written, so nothing was reinterpreted. `clientIp` went with them, so it is now recorded on device rows only.
-- The panels reading device facts — firmware, panel health, refresh echo, battery, Devices, upstream failures — all query this dataset. That is what stops the owner's own `curl` from rendering as a device.
+- The panels reading device facts — firmware, panel repaints, refresh echo, charge, WiFi signal, Devices, upstream failures — all query this dataset. That is what stops the owner's own `curl` from rendering as a device.
 - **`BLOB_FIELDS` is now deliberately wider than what `query.js` reads.** `imageCached`, `updateSource`, `wakeTime`, `batteryCapacity` and all ten doubles lost their reader in the move; `route` and `httpProtocol` never had one. They keep their slots and keep being written, because a write that stops announces nothing — a later query would silently span a boundary where the column just goes blank. `model` and `firmwareVersion` are still read here, by the enrollment breakdown, since `/api/setup` is a request and sends both.
 - **`identity.networks` still reads the requests dataset, filtered to authenticated**, and that is the one device-shaped panel that deliberately did not move. The leaked-token alarm has to catch an authenticated caller *without* device headers, which is exactly what a stolen URL looks like. A consequence: on an unpaired sign that row can name a network from the owner's own `curl` while the row above it says no device has polled. Odd-looking and correct.
+
+## Everything that describes one device lives in that device's box
+
+Changed 2026-08-05. Panel repaints, refresh rate echo, charge over time and WiFi signal over time were page-level panels aggregating across every device. Each of them describes **one piece of hardware**, so the aggregate averaged a healthy sign against a failing one and described neither — invisible while there are no devices, and wrong on the first day there are two. `query.js` groups all four by `deviceId`; `render.js` filters each slice into `deviceBox()` as a `subsection()`, an `h3` inside the box rather than an `h2` on the page.
+
+Three things this brought with it, none of them optional:
+
+- **The battery query sorts `DESC` and is reversed in JS, so its `LIMIT 4000` drops the oldest points.** `ORDER BY bucket ASC LIMIT n` takes the first n of an oldest-first sort, which cuts the *recent* end — the part of the chart anyone is looking at. That was the original shape and it was wrong by construction rather than by sizing. The cap is also per device now: at 90 days one device fills 360 six-hour buckets.
+
+- **The query errors are repeated in the no-device branch of `devicesSection()`.** With no boxes there is nowhere for a panel-repaint or battery failure to render, and a failed query shown nowhere is indistinguishable from a device that never polled. Same trap `emptyState()` exists for, one level up.
+
+- **The "latest reading" line was deleted, not moved.** It printed charge, voltage and RSSI beside the facts rows that already print them — from a *different source*, the six-hour bucket average rather than the last raw poll, so one box showed two different WiFi numbers. The charts keep only what the facts cannot show, which is the shape over time.
+
+**It is `Panel repaints`, not `Panel health`.** A cache miss means the board really changed, which during the day it does most minutes, so a low rate is what live departures look like rather than a fault. The fault it exposes is the rate collapsing while the board is *static* — the filename churning, flashing the panel for nothing.
+
+## Every device-box row that came from a header is marked
+
+A `*` on the label, and one italic footnote per box. The classification is stored as `OBSERVED_DEVICE_FACTS` — the six rows the server worked out for itself — and everything else is marked, so a row added later is treated as spoofable until someone decides otherwise. `render.test.js` pins the unmarked set against the rendered output, so renaming a label without updating the constant fails rather than silently reclassifying a row.
+
+**The MAC is a header like any other, and that bounds what the per-device split can do.** It separates devices that report honestly. Someone replaying the sign's URL with its MAC merges into its box and the split shows nothing — which is why the identity alarms above key on network and firmware instead, and why a single calm device box is not evidence of a single device.
 
 ## "No device has polled" is a state, not an empty panel
 

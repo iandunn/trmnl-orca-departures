@@ -206,13 +206,37 @@ export async function buildStatsData( env, config, rangeKey ) {
 			} )
 		),
 
-		run( groupQuery( { dataset: deviceDataset, columns: [ deviceBlobColumn( 'imageCached' ) ], days } ) ),
+		// Grouped by device as well as by value, because every reading below describes one piece of
+		// hardware. Aggregated across devices they average a healthy sign against a failing one and
+		// describe neither, which is invisible until the day a second device exists — exactly the day
+		// the numbers start mattering.
+		run(
+			groupQuery( {
+				dataset: deviceDataset,
+				columns: [ deviceBlobColumn( 'deviceId' ), deviceBlobColumn( 'imageCached' ) ],
+				days,
+			} )
+		),
 
-		run( groupQuery( { dataset: deviceDataset, columns: [ deviceDoubleColumn( 'refreshRateEcho' ) ], days } ) ),
+		run(
+			groupQuery( {
+				dataset: deviceDataset,
+				columns: [ deviceBlobColumn( 'deviceId' ), deviceDoubleColumn( 'refreshRateEcho' ) ],
+				days,
+			} )
+		),
 
+		// **Ordered newest-first and reversed in JS, so a cap that bites drops the oldest points.**
+		// `ORDER BY bucket ASC LIMIT n` takes the first n of an oldest-first sort, which cuts the
+		// *recent* end — the part of the chart anyone is looking at. Sorting the other way makes
+		// truncation lose history instead, which is the survivable direction.
+		//
+		// The cap is per device now, so it is also sized for several rather than one: at the 90-day
+		// maximum a single device fills 360 six-hour buckets.
 		run( `
 			SELECT
 				toStartOfInterval(timestamp, INTERVAL '6' HOUR) AS bucket,
+				${ deviceBlobColumn( 'deviceId' ) } AS device_id,
 				AVG(${ deviceDoubleColumn( 'batteryVoltage' ) }) AS voltage,
 				AVG(${ deviceDoubleColumn( 'percentCharged' ) }) AS percent,
 				-- WiFi signal shares the battery's bucketing because it is read the same way: one value
@@ -223,9 +247,9 @@ export async function buildStatsData( env, config, rangeKey ) {
 			FROM ${ deviceDataset }
 			WHERE timestamp > NOW() - INTERVAL '${ days }' DAY
 				AND ${ deviceDoubleColumn( 'percentCharged' ) } > ${ ABSENT_NUMBER }
-			GROUP BY bucket
-			ORDER BY bucket ASC
-			LIMIT 400
+			GROUP BY bucket, device_id
+			ORDER BY bucket DESC
+			LIMIT 4000
 		` ),
 
 		run( groupQuery( { dataset, columns: [ blobColumn( 'filenameTag' ) ], where: authorizedOnly, days } ) ),
@@ -472,14 +496,18 @@ export async function buildStatsData( env, config, rangeKey ) {
 		},
 
 		panel: {
-			imageCached: rowsToGroups( imageCached.data, [ 'imageCached' ] ),
+			imageCached: rowsToGroups( imageCached.data, [ 'deviceId', 'imageCached' ] ),
 			imageCachedError: imageCached.error,
-			refreshEcho: rowsToGroups( refreshEcho.data, [ 'refreshRateEcho' ] ),
+			refreshEcho: rowsToGroups( refreshEcho.data, [ 'deviceId', 'refreshRateEcho' ] ),
 			refreshEchoError: refreshEcho.error,
 		},
 
 		battery: {
-			series: battery.data.map( ( row ) => ( {
+			// Reversed back to ascending here rather than in the SQL, because the `DESC` above is what
+			// makes the row cap drop old history instead of the current reading. The charts plot in
+			// array order, and per-device filtering preserves it.
+			series: [ ...battery.data ].reverse().map( ( row ) => ( {
+				deviceId: row.device_id ?? '',
 				bucket: row.bucket ?? '',
 				voltage: toNumber( row.voltage ),
 				percent: toNumber( row.percent ),

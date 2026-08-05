@@ -67,6 +67,14 @@ A read-only deploy token fails with `Authentication error [code: 10000]`. Wrangl
 
 `npm run deploy` and `npm run tail` load `.cloudflare.env` themselves. **Do not run `source .cloudflare.env && npx wrangler deploy`** — `source` sets shell variables, not environment variables, so wrangler never receives the token and silently falls back to whatever account `wrangler login` last stored. That deploys to the wrong account with no error at all.
 
+### Two things about secrets that only surface later
+
+**`wrangler secret list` proves a secret exists, not what it holds.** Nothing will tell you that the deployed `DEVICE_TOKEN` and the one in your `.dev.vars` have drifted apart, and they can — re-running `secret put` against the wrong name, pasting a value a character short, or piping one in with a trailing newline all succeed and all compare unequal. `tokensMatch()` is an exact comparison with no trimming.
+
+The symptom is specific enough to diagnose from a browser. If **every** URL carrying the token returns 404 while `https://<your-worker>.workers.dev/robots.txt` still returns 200, the Worker is up and healthy and the token is what is wrong. Time the 404 to tell which mistake it is: an **immediate** one is a rejected token, and a **25-second** one is the bot tarpit answering a path that never parsed, which means the error is in the part of the URL *after* the token. Secrets are write-only, so there is nothing to read back and compare — set it again from the value you know is right.
+
+**A freshly set secret takes a minute or two to reach every edge.** Immediately after `wrangler secret put`, some requests are still answered by isolates holding the old value — roughly one in five at first, falling to none. It looks exactly like a fix that did not take. Re-test over a couple of minutes before concluding anything from a single failure.
+
 Once it is deployed, `npm run tail` streams the Worker's logs live, including the diagnostics the device POSTs to `/api/log`. That is the only channel back from a sign that is rendering nothing, so it is the first place to look. See [development.md](development.md#reading-the-devices-logs).
 
 To confirm the deployment answers correctly before you pair anything to it, [manual-testing.md](manual-testing.md) walks the four requests the device makes as `curl` commands, with what each response has to contain.

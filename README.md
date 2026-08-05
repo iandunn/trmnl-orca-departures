@@ -1,6 +1,6 @@
 # TRMNL X Orca Departures
 
-An e-paper sign showing live [King County Metro](https://kingcounty.gov/en/dept/metro) and [Sound Transit](https://soundtransit.org/) departures for a one or two stops, styled after Metro's real [Connectpoint](https://www.connectpointinc.com/) stop signs.
+An e-paper sign showing live [King County Metro](https://kingcounty.gov/en/dept/metro) and [Sound Transit](https://soundtransit.org/) departures, styled after Metro's real [Connectpoint](https://www.connectpointinc.com/) departure boards.
 
 A [TRMNL X](https://trmnl.com/) device wakes on an interval and polls a [Cloudflare Worker](https://www.cloudflare.com/products/workers/). The Worker fetches predictions from [OneBusAway](https://pugetsound.onebusaway.org/), renders a `1872x1404` greyscale PNG, and serves it back. All the scheduling and rendering logic lives on the server; the device only displays what it is handed.
 

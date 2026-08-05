@@ -25,6 +25,12 @@ Rather than exporting the token into your shell, you can source `.dev.vars` for 
 set -a && . ./.dev.vars && set +a && curl -s ".../token/$DEVICE_TOKEN/..."
 ```
 
+### Or paste a URL into a browser
+
+Three of these routes need nothing but a URL — `/api/setup`, `/image/<anything>` and `/stats` — so a browser tab is the quickest check against a *deployed* Worker, and the image one renders the board inline. `.dev.vars` carries those URLs as a comment, already expanded from the values sitting beside them, so there is nothing to fill in. Regenerate them if the token, the stop pair or the origin changes.
+
+`/api/display` and `/api/log` cannot be reached that way, and it is worth knowing why rather than assuming the URL is wrong: the first requires an `Access-Token` header and answers a browser with the same 404 as a bad token, and the second is a `POST`. Those two need `curl`.
+
 ## 1. `GET /api/setup` — enrollment
 
 Takes no `Access-Token`, because the device has no key yet — enrollment is how it gets one. Only `/api/display` and `/api/log` check the header; see step 3 for why `/image` cannot.

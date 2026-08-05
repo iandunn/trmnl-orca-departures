@@ -81,6 +81,24 @@ describe( 'renderStatsHtml', () => {
 		expect( html ).not.toMatch( /https?:\/\// );
 	} );
 
+	// Repaints, refresh echo and charge are `h3` rather than `h2` because they live inside a
+	// device box: each describes one piece of hardware, and averaging them across devices would
+	// describe none of them.
+	it( 'renders the per-device readings inside a device box rather than as page-level panels', () => {
+		const html = renderStatsHtml( buildMockStatsData( '7d' ) );
+
+		for ( const heading of [ 'Panel repaints', 'Refresh rate echo', 'Charge over time' ] ) {
+			expect( html ).toContain( `>${ heading }</h3>` );
+			expect( html ).not.toContain( `>${ heading }</h2>` );
+		}
+
+		const boxStart = html.indexOf( '>Device A4:CF:12:9B:7E:03</h2>' );
+		const boxEnd = html.indexOf( '>Request totals</h2>' );
+
+		expect( boxStart ).toBeGreaterThan( -1 );
+		expect( html.slice( boxStart, boxEnd ) ).toContain( '>Charge over time</h3>' );
+	} );
+
 	it( 'renders every section heading', () => {
 		const html = renderStatsHtml( buildMockStatsData( '7d' ) );
 
@@ -88,9 +106,6 @@ describe( 'renderStatsHtml', () => {
 			'Device identity',
 			'Request totals',
 			'Outcome breakdown',
-			'Panel health',
-			'Refresh rate echo',
-			'Battery',
 			'Render outcomes',
 			'Device logs',
 			'Configuration errors',
@@ -143,7 +158,9 @@ describe( 'escaping', () => {
 	it( 'escapes quotes in attribute context, where a payload needs no angle bracket to break out', () => {
 		const data = buildMockStatsData( '7d' );
 
-		data.battery.series = [ { bucket: '" onmouseover="alert(1)', voltage: 3.9, percent: 80 } ];
+		data.battery.series = [
+			{ deviceId: data.devices.rows[ 0 ].deviceId, bucket: '" onmouseover="alert(1)', voltage: 3.9, percent: 80 },
+		];
 
 		const html = renderStatsHtml( data );
 
@@ -315,11 +332,25 @@ describe( 'before any device has polled', () => {
  * "every stop answered on every poll in this window" directly under the 422 from the query that
  * would have found out. The sentence is the part a reader believes.
  */
+/**
+ * `emptyData()` plus one device that has reported nothing.
+ *
+ * Repaints, refresh echo and charge are drawn inside a device box, so their empty states need a
+ * box to be empty *in*. This is the state a sign is in between its first poll and its first reading.
+ */
+function emptyDataWithDevice() {
+	const data = emptyData();
+
+	data.devices.rows = [ { deviceId: 'AA:BB:CC:00:11:22', lastSeen: '2026-08-01 07:00:00' } ];
+	data.identity.deviceCount = 1;
+
+	return data;
+}
+
 describe( 'empty states beside a failed query', () => {
 	it.each( [
 		[ 'upstreamReasons', 'error', 'every stop answered' ],
 		[ 'renderOutcomes', 'error', 'nothing has been rendered yet' ],
-		[ 'battery', 'error', 'nothing has reported a battery reading' ],
 	] )( 'withholds the %s empty state when its query failed', ( section, key, sentence ) => {
 		const clean = emptyData();
 
@@ -335,17 +366,37 @@ describe( 'empty states beside a failed query', () => {
 		expect( html ).not.toContain( sentence );
 	} );
 
+	// The per-device blocks need a device to render into, so these use a box with no readings in it
+	// rather than `emptyData()` — with no device there is no empty state to withhold in the first place.
 	it.each( [
-		[ 'imageCachedError', 'nothing has reported a cache result' ],
-		[ 'refreshEchoError', 'no device has reported a refresh rate yet' ],
-	] )( 'withholds the panel-health empty state keyed on %s', ( key, sentence ) => {
-		expect( renderStatsHtml( emptyData() ) ).toContain( sentence );
+		[ 'battery', 'error', 'this device has not reported a battery reading yet' ],
+		[ 'panel', 'imageCachedError', 'this device has not reported a cache result yet' ],
+		[ 'panel', 'refreshEchoError', 'this device has not reported a refresh rate yet' ],
+	] )( 'withholds the %s.%s empty state when its query failed', ( section, key, sentence ) => {
+		expect( renderStatsHtml( emptyDataWithDevice() ) ).toContain( sentence );
 
+		const broken = emptyDataWithDevice();
+
+		broken[ section ][ key ] = 'SQL API HTTP 422';
+
+		const html = renderStatsHtml( broken );
+
+		expect( html ).toContain( 'query failed: SQL API HTTP 422' );
+		expect( html ).not.toContain( sentence );
+	} );
+
+	// Those three blocks only exist inside a device box, so with no device their failures have nowhere
+	// to appear — and a query error rendered nowhere reads exactly like a device that has not polled.
+	it.each( [
+		[ 'battery', 'error' ],
+		[ 'panel', 'imageCachedError' ],
+		[ 'panel', 'refreshEchoError' ],
+	] )( 'still reports a failed %s.%s query when no device has polled', ( section, key ) => {
 		const broken = emptyData();
 
-		broken.panel[ key ] = 'SQL API HTTP 422';
+		broken[ section ][ key ] = 'SQL API HTTP 422';
 
-		expect( renderStatsHtml( broken ) ).not.toContain( sentence );
+		expect( renderStatsHtml( broken ) ).toContain( 'query failed: SQL API HTTP 422' );
 	} );
 } );
 
@@ -359,8 +410,8 @@ describe( 'per-panel errors', () => {
 
 		expect( html ).toContain( 'query failed: no such column: double99' );
 
-		// Everything either side of the broken panel still renders.
-		expect( html ).toContain( '>Panel health</h2>' );
+		// Everything either side of the broken block still renders.
+		expect( html ).toContain( '>Panel repaints</h3>' );
 		expect( html ).toContain( '>Render outcomes</h2>' );
 		expect( html ).toContain( '2 distinct networks — expected exactly one' );
 	} );
@@ -396,36 +447,187 @@ describe( 'battery', () => {
 		expect( html ).toContain( 'left out of the chart' );
 	} );
 
-	it( 'reports an absent latest reading as no data', () => {
+	// Asserted through the empty state rather than through "no data", which the device-log table also
+	// prints — that made this pass while testing nothing after the latest-reading line was removed.
+	it( 'draws no chart, and says so, when every bucket is absent', () => {
 		const data = buildMockStatsData( '7d' );
+		const deviceId = data.devices.rows[ 0 ].deviceId;
 
-		data.battery.series = [ { bucket: '2026-07-29 06:00:00', voltage: -1, percent: -1 } ];
+		data.battery.series = [ { deviceId, bucket: '2026-07-29 06:00:00', voltage: -1, percent: -1, signal: -1 } ];
 
 		const html = renderStatsHtml( data );
 
-		expect( html ).toContain( 'no data' );
+		expect( html ).toContain( 'this device has not reported a battery reading yet' );
+		expect( html ).toContain( 'this device has not reported a WiFi signal reading yet' );
 		expect( chartPoints( html ) ).toHaveLength( 0 );
+	} );
+
+	// The two series are different phenomena and must not be generated as one shape: a sign on a wall
+	// does not drift away from its router, so RSSI is flat and noisy while charge trends down.
+	it( 'gives WiFi signal a flat, noisy shape rather than the battery curve', () => {
+		const reported = buildMockStatsData( '3m' ).battery.series.filter( ( point ) => point.percent > -1 );
+		const first = reported.slice( 0, 20 );
+		const last = reported.slice( -20 );
+
+		const mean = ( points, key ) => points.reduce( ( sum, point ) => sum + point[ key ], 0 ) / points.length;
+
+		// Charge ends materially lower than it started; signal does not.
+		expect( mean( last, 'percent' ) ).toBeLessThan( mean( first, 'percent' ) - 10 );
+		expect( Math.abs( mean( last, 'signal' ) - mean( first, 'signal' ) ) ).toBeLessThan( 8 );
+
+		// And it is noise, not a constant — there are dips well below the baseline.
+		expect( Math.min( ...reported.map( ( point ) => point.signal ) ) ).toBeLessThan( -70 );
+		expect( Math.max( ...reported.map( ( point ) => point.signal ) ) ).toBeGreaterThan( -64 );
+	} );
+
+	it( 'trims the series to the selected range, the way the real query does', () => {
+		const long = buildMockStatsData( '3m' ).battery.series;
+		const short = buildMockStatsData( '7d' ).battery.series;
+
+		expect( long ).toHaveLength( 90 * 4 );
+		expect( short ).toHaveLength( 7 * 4 );
+
+		// The short window is the recent end of the same history, not a separately generated series.
+		expect( short ).toEqual( long.slice( -short.length ) );
+	} );
+
+	it( 'scales volumes with the range, so the picker moves the numbers and not only the charts', () => {
+		const week = buildMockStatsData( '7d' );
+		const month = buildMockStatsData( '1m' );
+
+		expect( month.totals.total ).toBeGreaterThan( week.totals.total * 3 );
+		expect( month.deviceLogs.levels[ 0 ].count ).toBeGreaterThan( week.deviceLogs.levels[ 0 ].count * 3 );
+
+		// Enrolments are discrete events, so they say the same thing on every range.
+		expect( month.identity.setupCalls ).toBe( week.identity.setupCalls );
+		expect( month.identity.enrollments ).toEqual( week.identity.enrollments );
+		expect( month.recent.rows ).toEqual( week.recent.rows );
+	} );
+
+	it( 'dates the intermediate x ticks, not only the two ends', () => {
+		const html = renderStatsHtml( buildMockStatsData( '2w' ) );
+		const tracks = html.split( '<div class="x-track">' ).slice( 1 );
+
+		// One per chart: charge and WiFi signal.
+		expect( tracks ).toHaveLength( 2 );
+		expect( [ ...tracks[ 0 ].matchAll( /class="x-tick"/g ) ] ).toHaveLength( 5 );
+
+		// The leftmost keeps its year so the rest can drop it.
+		expect( tracks[ 0 ] ).toMatch( /class="x-tick"[^>]*>\d{4}-\d{2}-\d{2}</ );
+		expect( tracks[ 0 ] ).toMatch( /class="x-tick"[^>]*>\d{2}-\d{2}</ );
 	} );
 
 	it( 'plots a single reading without dividing by zero', () => {
 		const data = buildMockStatsData( '7d' );
 
-		data.battery.series = [ { bucket: '2026-07-29 06:00:00', voltage: 3.9, percent: 80 } ];
+		data.battery.series = [
+			{ deviceId: data.devices.rows[ 0 ].deviceId, bucket: '2026-07-29 06:00:00', voltage: 3.9, percent: 80 },
+		];
 
 		expect( chartPoints( renderStatsHtml( data ) ) ).toHaveLength( 1 );
 	} );
+
+	// The whole point of the per-device split: one sign at 20% must not be averaged into a healthy one.
+	it( 'charts each device from its own readings rather than from a shared average', () => {
+		const data = buildMockStatsData( '7d' );
+		const first = data.devices.rows[ 0 ].deviceId;
+		const second = 'BB:CC:DD:11:22:33';
+
+		data.devices.rows = [ ...data.devices.rows, { ...data.devices.rows[ 0 ], deviceId: second } ];
+
+		data.battery.series = [
+			{ deviceId: first, bucket: '2026-07-29 00:00:00', voltage: 4.01, percent: 91 },
+			{ deviceId: first, bucket: '2026-07-29 06:00:00', voltage: 4.0, percent: 90 },
+			{ deviceId: second, bucket: '2026-07-29 06:00:00', voltage: 3.4, percent: 20 },
+		];
+
+		const html = renderStatsHtml( data );
+		const split = html.indexOf( `>Device ${ second }</h2>` );
+
+		expect( split ).toBeGreaterThan( -1 );
+		expect( html.slice( 0, split ) ).toContain( 'Battery charge over 2 buckets' );
+		expect( html.slice( split ) ).toContain( 'Battery charge over 1 buckets' );
+
+		// The second device sits at 20%, a fifth of the way up a 0-100 axis, so its single point is
+		// plotted at y = 104 of 130. Averaged against the first device it would land near the top
+		// instead, which makes the coordinate the assertion rather than the bucket count.
+		expect( html.slice( split ) ).toContain( 'points="360.0,104.0"' );
+	} );
 } );
 
-describe( 'panel health', () => {
-	it( 'renders the cache hit rate as a percentage, since it is the flicker rate', () => {
+describe( 'device facts the server did not observe', () => {
+	/** Every device-box row as `[ label, marked ]`, with the marker stripped back out of the label. */
+	function factRows( html ) {
+		return [ ...html.matchAll( /<div class="fact"><dt>(.*?)<\/dt>/g ) ].map( ( [ , dt ] ) => [
+			dt.replace( '<span class="tell">*</span>', '' ),
+			dt.includes( 'tell' ),
+		] );
+	}
+
+	it( 'marks the MAC address, which a caller replaying the URL can set to anything', () => {
+		const rows = factRows( renderStatsHtml( buildMockStatsData( '7d' ) ) );
+
+		expect( rows.length ).toBeGreaterThan( 0 );
+		expect( rows ).toContainEqual( [ 'MAC address', true ] );
+		expect( rows ).toContainEqual( [ 'IP address', false ] );
+	} );
+
+	// Pins the classification from the rendered output rather than from the constant, so renaming a
+	// label in `facts` without renaming it in `OBSERVED_DEVICE_FACTS` fails here instead of silently
+	// marking an observed row as self-reported.
+	it( 'leaves unmarked exactly the rows the server worked out for itself', () => {
+		const unmarked = factRows( renderStatsHtml( buildMockStatsData( '7d' ) ) )
+			.filter( ( [ , marked ] ) => ! marked )
+			.map( ( [ label ] ) => label );
+
+		expect( unmarked ).toEqual( [
+			'IP address',
+			'Network',
+			'Last seen',
+			'Last request',
+			'Last screen served',
+			'Upstream on that poll',
+		] );
+	} );
+
+	it( 'explains the marker in the box rather than leaving a bare asterisk', () => {
+		expect( renderStatsHtml( buildMockStatsData( '7d' ) ) ).toContain( 'Self-reported by the device' );
+	} );
+} );
+
+describe( 'panel repaints', () => {
+	it( 'renders the share of wakes that did not repaint, as a percentage', () => {
 		const data = buildMockStatsData( '7d' );
+		const deviceId = data.devices.rows[ 0 ].deviceId;
 
 		data.panel.imageCached = [
-			{ imageCached: 'true', count: 750, lastSeen: '' },
-			{ imageCached: 'false', count: 250, lastSeen: '' },
+			{ deviceId, imageCached: 'true', count: 750, lastSeen: '' },
+			{ deviceId, imageCached: 'false', count: 250, lastSeen: '' },
 		];
 
 		expect( renderStatsHtml( data ) ).toContain( '<strong>75.0%</strong>' );
+	} );
+
+	// The rate is per device for the same reason the charge chart is: one sign repainting on every
+	// wake is the fault this number exists to expose, and an average with a healthy sign hides it.
+	it( 'computes the rate per device rather than across all of them', () => {
+		const data = buildMockStatsData( '7d' );
+		const first = data.devices.rows[ 0 ].deviceId;
+		const second = 'BB:CC:DD:11:22:33';
+
+		data.devices.rows = [ ...data.devices.rows, { ...data.devices.rows[ 0 ], deviceId: second } ];
+
+		data.panel.imageCached = [
+			{ deviceId: first, imageCached: 'true', count: 900, lastSeen: '' },
+			{ deviceId: first, imageCached: 'false', count: 100, lastSeen: '' },
+			{ deviceId: second, imageCached: 'false', count: 1000, lastSeen: '' },
+		];
+
+		const html = renderStatsHtml( data );
+		const split = html.indexOf( `>Device ${ second }</h2>` );
+
+		expect( html.slice( 0, split ) ).toContain( '<strong>90.0%</strong>' );
+		expect( html.slice( split ) ).toContain( '<strong>0.0%</strong>' );
 	} );
 
 	it( 'calls out a refresh rate of 0, which arrives as a string from a double column', () => {
@@ -456,13 +658,17 @@ describe( 'device logs', () => {
 		expect( renderStatsHtml( buildMockStatsData( '7d' ) ) ).toContain( 'name the exact line of' );
 	} );
 
+	// Counts are read out of the data rather than hardcoded, because the mock scales its volumes to
+	// the selected range — a literal here would pin the range as much as the rendering.
 	it( 'counts by level, giving error the warning tone so a spike needs no reading', () => {
-		const html = deviceLogsPanel( renderStatsHtml( buildMockStatsData( '7d' ) ) );
+		const data = buildMockStatsData( '7d' );
+		const html = deviceLogsPanel( renderStatsHtml( data ) );
+		const countOf = ( level ) => data.deviceLogs.levels.find( ( row ) => row.level === level ).count;
 
 		expect( barFor( html, 'error' ) ).toContain( 'bar-fill rejected' );
-		expect( barFor( html, 'error' ) ).toContain( '>31</span>' );
+		expect( barFor( html, 'error' ) ).toContain( `>${ countOf( 'error' ) }</span>` );
 		expect( barFor( html, 'info' ) ).toContain( 'bar-fill served' );
-		expect( barFor( html, 'info' ) ).toContain( '>4,120</span>' );
+		expect( barFor( html, 'info' ) ).toContain( `>${ countOf( 'info' ).toLocaleString( 'en-US' ) }</span>` );
 	} );
 
 	it( 'renders the source as path:line', () => {

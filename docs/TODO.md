@@ -10,7 +10,7 @@ Two phases plus housekeeping: phase 1 needs no hardware, phase 2 needs the devic
 
 Where the sign is *wrong* rather than degraded, which is worse.
 
-- [ ] **Compare the preview against the OneBusAway app** — discrepancies seen, not diagnosed.
+- [ ] **Compare the board against the OneBusAway app** — discrepancies were seen once and never diagnosed. **Checked again 2026-08-05 against the deployed Worker with the real API key, and every row matched.** That is one sample in one window at one pair of stops, so it retires nothing: the original discrepancies were never explained, and the cases most likely to differ — a route with no real-time, a cancelled trip, a bus already at the kerb — are exactly the ones a single mid-morning check will not contain. Keep sampling, and note when it matches as well as when it does not.
 
 - [ ] **Handle negative predictions** (`-2 min`). `NOW_GRACE_MS` in `oba/format.js` is 60s; anything older has no defined treatment.
 
@@ -27,9 +27,7 @@ Claude you should do as many of these as possible when I aske, but skip ones tha
 
 ### Confirm before shipping
 
-- [ ] **Is the deployed `OBA_API_KEY` the real key or `TEST`?** `secret:list` shows it exists, not what it holds. `TEST` is heavily rate-limited and will 429 in production. Set with `npm run secret -- OBA_API_KEY`.
-
-- [ ] **Nothing has been measured against the real rate limit.** With a real key the memo means ~1440 calls/day for one stop, ~2880 for two — never checked against whatever quota Sound Transit issues.
+- [ ] **Nothing has been measured against the real rate limit.** The memo means ~1440 calls/day for one stop, ~2880 for two — never checked against whatever quota Sound Transit issues with the key.
 
 - [ ] **Draft the pairing runbook.** How the sign gets onto the device has no answer in the repo yet, and it is the step with the most silent failures: the URL is discarded if the WiFi password is wrong, changing it wipes `api_key` and `friendly_id`, and `/api/setup` follows no redirects. `docs/deploying.md` step 4 is the skeleton. Finishable only against the device.
 
@@ -48,7 +46,11 @@ Run this block before first contact with the device.
 
 Nothing in the server work is blocked on the hardware. Everything here is. Getting it onto a wall is a separate question — see [mounting-ideas.md](mounting-ideas.md).
 
-- [ ] **Clear `/stats` before the device is ever pointed at the Worker.** Everything recorded so far is development traffic, and it permanently skews the panels that matter most on day one — device identity is built to make a *single* deviation legible.
+- [ ] **Clear `/stats` once the device is confirmed working — not before pointing it at the Worker.** Everything recorded so far is development traffic, and it permanently skews the panels that matter most on day one, because device identity is built to make a *single* deviation legible.
+
+	**The timing is the point, and it is the opposite of the obvious one.** Clearing first still leaves every row that pairing itself produces: the mistyped URL, the re-pairs, the enrollment calls, the hand-made `curl` that proves an endpoint answers. That is exactly the traffic the identity alarms are built to notice, so a dataset that starts the moment the sign first works is clean in a way one that starts the moment before pairing never is. Wait for a board on the glass, then rename.
+
+	Note there is already a phantom device in the deployed datasets from smoke tests on 2026-08-05 — headers claiming a paired X on MAC `AA:BB:CC:DD:EE:FF`, plus a `/api/log` entry and about 45 request rows. One more reason the rename is not optional.
 
 	**The procedure is in [`manual-testing.md`](manual-testing.md#clearing-the-stats-data)** — Analytics Engine has no delete, so it means renaming all three datasets and redeploying. Follow it there rather than duplicating it here; it has the traps, and a half-done rename is worse than not doing it.
 
@@ -59,6 +61,10 @@ Nothing in the server work is blocked on the hardware. Everything here is. Getti
 - [ ] **Size the "Updated at" stamp.** The single load-bearing staleness defense, and "at a glance" is the whole condition the accepted risk rests on. Currently 38px bottom-left, unproven at physical size; losing the OneBusAway mark freed width to grow it.
 
 - [ ] **Finish the pairing runbook** against the real captive portal.
+
+- [ ] **`DEVICE_TOKEN` does not change when the device arrives**, written down because the opposite is the natural assumption. The token is ours, not the device's: `deriveApiKey()` in `src/byos/credentials.js` is an HMAC over `DEVICE_TOKEN` alone, with no MAC and nothing else from the hardware mixed in. Pairing runs one way — the token goes *into* the device as a segment of the base URL typed into the captive portal, and the device hands back an `api_key` derived from it. There is nothing to read off the hardware and no secret to sync on arrival.
+
+	What does matter on arrival is the reverse: **re-entering the base URL wipes the stored `api_key` and `friendly_id`**, which is the supported way to re-point a device rather than a corrupt state. Rotating `DEVICE_TOKEN` after pairing therefore costs a trip to the sign, which is the argument for rotating it *before*.
 
 - [ ] **The setup logo is the full-panel board image**, so the pairing screen shows a 1872x1404 notice. Cosmetic, shown once; a smaller render needs a second size through `rasterize()`.
 
