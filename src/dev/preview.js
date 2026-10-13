@@ -11,6 +11,7 @@
 
 import { currentScreen } from '../byos/display.js';
 import { readConfig } from '../config.js';
+import { GLASS_HIDDEN_LEFT, GLASS_STRIP_RIGHT, PANEL_WIDTH } from '../render/board.js';
 import { rasterize, renderBoard } from '../render/index.js';
 import { buildMockStatsData, buildUnpairedMockStatsData, renderStatsHtml } from '../stats/render.js';
 import { runByosChecks } from './byos-check.js';
@@ -77,6 +78,31 @@ function requestedTime( url ) {
 	return Number.isFinite( pinned ) && pinned >= EARLIEST_PINNED_MS ? pinned : undefined;
 }
 
+/**
+ * Shows each render as the glass does rather than as a monitor does.
+ *
+ * E-paper has no true white or black: an image's white is the panel's grey-white paper and its black a
+ * slightly soft ink. Judged on pure white, a light tint like a direction band looks far more visible
+ * than it is on the device. This maps every pixel linearly between approximations of the two, and the
+ * glass constants below crop and offset the image the way the panel does. Page only — the PNG routes
+ * still serve the exact bytes the device receives.
+ */
+const EPAPER_PAPER = [ 218, 217, 210 ];
+const EPAPER_INK = [ 38, 38, 38 ];
+
+/** The visible glass, in image pixels. The two estimates come from `render/board.js`. */
+const GLASS_WIDTH = PANEL_WIDTH - GLASS_HIDDEN_LEFT + GLASS_STRIP_RIGHT;
+
+const EPAPER_FILTER =
+	'<svg width="0" height="0" style="position:absolute"><filter id="epaper" color-interpolation-filters="sRGB"><feComponentTransfer>' +
+	[ 'R', 'G', 'B' ]
+		.map(
+			( channel, index ) =>
+				`<feFunc${ channel } type="linear" slope="${ ( ( EPAPER_PAPER[ index ] - EPAPER_INK[ index ] ) / 255 ).toFixed( 4 ) }" intercept="${ ( EPAPER_INK[ index ] / 255 ).toFixed( 4 ) }"/>`
+		)
+		.join( '' ) +
+	'</feComponentTransfer></filter></svg>';
+
 function contactSheet( boards, nowParam, { heading = '', extraNav = '' } = {} ) {
 	const stamp = Date.now();
 	const carried = nowParam ? `&now=${ encodeURIComponent( nowParam ) }` : '';
@@ -85,7 +111,7 @@ function contactSheet( boards, nowParam, { heading = '', extraNav = '' } = {} ) 
 		( sample ) =>
 			`<figure id="${ sample.slug }"><figcaption><span>${ sample.title }</span>` +
 			`<a href="${ PREVIEW_PREFIX }/${ sample.slug }.png" download="${ sample.slug }.png">download png</a></figcaption>` +
-			`<img src="${ PREVIEW_PREFIX }/${ sample.slug }.png?t=${ stamp }${ carried }" alt="${ sample.title }"></figure>`
+			`<div class="glass"><img src="${ PREVIEW_PREFIX }/${ sample.slug }.png?t=${ stamp }${ carried }" alt="${ sample.title }"></div></figure>`
 	).join( '' );
 
 	const nav = boards.map(
@@ -105,8 +131,11 @@ function contactSheet( boards, nowParam, { heading = '', extraNav = '' } = {} ) 
 		// Well under native width: at 1872 the panel fills the screen and you cannot judge it as a
 		// whole object, which is how it will actually be read.
 		`:root{--w:940px}` +
-		`img{display:block;width:100%;max-width:var(--w);background:#fff;box-shadow:0 2px 12px rgba(0,0,0,.5)}` +
+		// The image is cropped and offset inside a paper-coloured frame the width of the visible glass.
+		`.glass{max-width:var(--w);overflow:hidden;background:rgb(${ EPAPER_PAPER.join( ',' ) });box-shadow:0 2px 12px rgba(0,0,0,.5)}` +
+		`.glass img{display:block;width:${ ( ( PANEL_WIDTH / GLASS_WIDTH ) * 100 ).toFixed( 4 ) }%;margin-left:-${ ( ( GLASS_HIDDEN_LEFT / GLASS_WIDTH ) * 100 ).toFixed( 4 ) }%;filter:url(#epaper)}` +
 		`</style>` +
+		EPAPER_FILTER +
 		`<h1>${ heading || '1872 &times; 1404 &middot; 4-bit greyscale &middot; shown at 50% &middot; reload to re-render' }</h1>` +
 		`<nav>${ nav }<a href="${ PREVIEW_PREFIX }?now=live">render at the real clock</a>` +
 		`<a href="${ PREVIEW_PREFIX }/byos">BYOS self-check</a>` +
