@@ -182,8 +182,8 @@ function footer( label, ink = GREY, rule = RULE ) {
 }
 
 /**
- * The whole screen. An inked background stops at `BLEED_LEFT`, like the board's header bar, so the
- * panel's unfilled right-hand columns read as a matching margin rather than a fault.
+ * The whole screen. An inked background starts at `BLEED_LEFT`, like the board's header bar, over a
+ * paper base so any columns it leaves uncovered stay paper rather than reading as black.
  */
 function panel( background, contents ) {
 	return (

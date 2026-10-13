@@ -71,21 +71,22 @@ export const HEADER_HEIGHT = 102;
 /**
  * How the first real X places the image on its glass: about this many columns hidden under the bezel
  * on the left, and a strip of never-driven paper about this wide on the right. Judged by eye on the
- * glass, since no image can reach the right strip to measure it. `/_preview` draws its renders with
- * the same numbers, so changing them here keeps the preview honest.
+ * glass, since no image can reach the right strip to measure it. `/_preview` and the README
+ * screenshots draw the glass with these, through `src/dev/epaper.js`; the device never uses them.
  */
 export const GLASS_HIDDEN_LEFT = 3;
-export const GLASS_STRIP_RIGHT = 4;
+export const GLASS_STRIP_RIGHT = 5;
 
 /**
  * Where full-width shapes start and end — the header bar, the direction bands, the footer rule.
  *
- * Not the panel edges. Nothing can fill the right strip, because an image wider than the panel
- * crash-loops the device, so the left edge is given a matching gap instead and both read as a
- * margin rather than a fault. Very likely the same on every X, which is why this is a constant
- * rather than config.
+ * The panel edges, deliberately. Nothing can fill the right strip, because an image wider than the
+ * panel crash-loops the device, so a matching gap on the left was tried instead: 4px and 7px, and an
+ * exact match would have needed about 8. Any gap there looked worse on the glass than shapes running
+ * to the left edge with the strip on the right alone, so this stays at 0. Kept as a constant so a
+ * panel that does want a gap needs one number changed.
  */
-export const BLEED_LEFT = GLASS_HIDDEN_LEFT + GLASS_STRIP_RIGHT;
+export const BLEED_LEFT = 0;
 export const BLEED_RIGHT = PANEL_WIDTH;
 const BAND_HEIGHT = 58;
 const GROUP_GAP = 30;
