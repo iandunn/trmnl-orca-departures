@@ -37,13 +37,32 @@ describe( 'buildFilename', () => {
 			expect( build().length ).toBeLessThanOrEqual( 30 );
 		} );
 
+		// The firmware deletes every cached image sharing the new one's first 13 characters before
+		// saving it. If renders of one screen differ there, old images are never cleared and fill flash.
+		it( 'keeps the first 13 characters the same across renders of one screen type', () => {
+			for ( const tag of Object.values( FILENAME_TAGS ) ) {
+				const first = build( { tag, content: 'one board' } );
+				const second = build( { tag, content: 'a different board' } );
+
+				expect( first ).not.toBe( second );
+				expect( first.slice( 0, 13 ) ).toBe( second.slice( 0, 13 ) );
+			}
+		} );
+
+		// The same purge must never let one screen type clear another's cached image.
+		it( 'gives every screen type a distinct 13-character identity', () => {
+			const identities = Object.values( FILENAME_TAGS ).map( ( tag ) => build( { tag } ).slice( 0, 13 ) );
+
+			expect( new Set( identities ).size ).toBe( identities.length );
+		} );
+
 		it( 'carries no file extension', () => {
 			// A trailing `.png` is enough to break the trailing-digits rule above.
 			expect( build() ).not.toContain( '.' );
 		} );
 
 		it( 'matches the documented tag-hash-epoch layout', () => {
-			expect( build() ).toMatch( /^[a-z0-9]{7}-[a-z0-9]{6}-\d{10}$/ );
+			expect( build() ).toMatch( /^[a-z0-9]{7}-sign-[a-z0-9]{5}-\d{10}$/ );
 		} );
 	} );
 
@@ -105,7 +124,7 @@ describe( 'buildFilename', () => {
 		} );
 
 		it( 'still satisfies the shape rules when salted', () => {
-			expect( build( { salt: 'gen-2' } ) ).toMatch( /^[a-z0-9]{7}-[a-z0-9]{6}-\d{10}$/ );
+			expect( build( { salt: 'gen-2' } ) ).toMatch( /^[a-z0-9]{7}-sign-[a-z0-9]{5}-\d{10}$/ );
 		} );
 	} );
 
@@ -196,10 +215,10 @@ describe( 'buildFilename', () => {
 	} );
 
 	describe( 'hash', () => {
-		it( 'is always padded to six characters', () => {
+		it( 'is always padded to five characters, keeping the name at 29', () => {
 			// Small hash values must not shorten the name; the length rules depend on it.
 			for ( let i = 0; i < 500; i++ ) {
-				expect( build( { content: `sample-${ i }` } ) ).toHaveLength( 25 );
+				expect( build( { content: `sample-${ i }` } ) ).toHaveLength( 29 );
 			}
 		} );
 

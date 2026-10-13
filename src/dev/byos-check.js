@@ -168,9 +168,9 @@ async function displayChecks( env, origin, apiKey ) {
 				'neither field present'
 			),
 			check(
-				'`filename` is 25 characters, never 31',
+				'`filename` is 29 characters, never 31',
 				'At exactly 31 the firmware copies without a NUL terminator and the cache key ends in stack garbage.',
-				filename.length === 25 && filename.length !== 31,
+				filename.length === 29 && filename.length !== 31,
 				`${ filename.length } chars`
 			),
 			check(
@@ -370,7 +370,7 @@ async function cacheKeyChecks( env, origin, apiKey ) {
 		check(
 			'the name is tied to the rendered image',
 			'`filename` must change when the bytes change and stay put when they do not. Hashing the SVG makes that literally true rather than approximately true.',
-			/^[a-z0-9]{7}-[a-z0-9]{6}-\d{10}$/.test( first ),
+			/^[a-z0-9]{7}-sign-[a-z0-9]{5}-\d{10}$/.test( first ),
 			first
 		),
 	];

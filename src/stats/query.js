@@ -140,14 +140,14 @@ export function expectedRequests( config, days ) {
  */
 export async function buildStatsData( env, config, rangeKey ) {
 	const range = resolveRange( rangeKey );
-	const dataset = env?.ANALYTICS_DATASET || 'trmnl_orca_departures_requests';
-	const logDataset = env?.DEVICE_LOGS_DATASET || 'trmnl_orca_departures_device_logs';
+	const dataset = env?.ANALYTICS_DATASET || 'trmnl_orca_departures_requests_v2';
+	const logDataset = env?.DEVICE_LOGS_DATASET || 'trmnl_orca_departures_device_logs_v2';
 
 	// Every row here came from a request carrying device headers, so the panels below need no
 	// `authorized` filter and — more usefully — cannot pick up the owner's own `curl`. That is not a
 	// nicety: two hand-made requests were enough to make `/stats` report a firmware build of "unknown"
 	// on a panel of -1 by -1, which reads as a device in trouble rather than as no device at all.
-	const deviceDataset = env?.DEVICE_TELEMETRY_DATASET || 'trmnl_orca_departures_devices';
+	const deviceDataset = env?.DEVICE_TELEMETRY_DATASET || 'trmnl_orca_departures_devices_v2';
 
 	const days = range.days;
 

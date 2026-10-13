@@ -88,9 +88,9 @@ CALIBRATION_SCREEN = "false"
 
 # Must match the `dataset` of the matching binding below. Read through vars rather than hardcoded so
 # the queries and the bindings cannot drift apart silently.
-ANALYTICS_DATASET = "trmnl_orca_departures_requests"
-DEVICE_LOGS_DATASET = "trmnl_orca_departures_device_logs"
-DEVICE_TELEMETRY_DATASET = "trmnl_orca_departures_devices"
+ANALYTICS_DATASET = "trmnl_orca_departures_requests_v2"
+DEVICE_LOGS_DATASET = "trmnl_orca_departures_device_logs_v2"
+DEVICE_TELEMETRY_DATASET = "trmnl_orca_departures_devices_v2"
 
 # Request outcomes, for the `/stats` page. Analytics Engine rather than KV, and the reason is worth
 # keeping written down: KV's free write quota is 1000 a day and this sign alone polls roughly 1440
@@ -107,7 +107,7 @@ DEVICE_TELEMETRY_DATASET = "trmnl_orca_departures_devices"
 # 10089. Enable it at dash.cloudflare.com under Workers, Analytics Engine.
 [[analytics_engine_datasets]]
 binding = "ANALYTICS"
-dataset = "trmnl_orca_departures_requests"
+dataset = "trmnl_orca_departures_requests_v2"
 
 # `/api/log`, the device's own diagnostic channel — the only window into a sign that is rendering
 # nothing. Written by `recordDeviceLogs()` in `src/stats/device-logs.js` and read back by the Device
@@ -123,7 +123,7 @@ dataset = "trmnl_orca_departures_requests"
 # dilute the sampling of request outcomes, and so the two can be queried and aged independently.
 [[analytics_engine_datasets]]
 binding = "DEVICE_LOGS"
-dataset = "trmnl_orca_departures_device_logs"
+dataset = "trmnl_orca_departures_device_logs_v2"
 
 # What the device reports about itself on every wake — MAC address, firmware build, panel geometry,
 # battery and WiFi. Written by `recordDeviceTelemetry()` in `src/stats/device-telemetry.js` and read
@@ -139,7 +139,7 @@ dataset = "trmnl_orca_departures_device_logs"
 # rows in the requests dataset are scanner traffic where every one of them would be empty.
 [[analytics_engine_datasets]]
 binding = "DEVICE_TELEMETRY"
-dataset = "trmnl_orca_departures_devices"
+dataset = "trmnl_orca_departures_devices_v2"
 
 # Required for the bundled font, or the static import fails.
 #

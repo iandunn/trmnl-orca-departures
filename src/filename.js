@@ -8,7 +8,7 @@
  * freezes the panel forever while the server serves perfectly fresh JSON, and a name that changes
  * every poll costs a download plus a visible full-panel flash every time.
  *
- * Three firmware rules constrain the shape, all documented in `CLAUDE.md`:
+ * Four firmware rules constrain the shape, all documented in `CLAUDE.md`:
  *
  * 1. The last 10 characters must be ASCII digits forming a plausible recent epoch. The purge that
  *    runs before every image write extracts them as a timestamp and deletes anything over 24h old
@@ -17,17 +17,30 @@
  * 2. The total length must never be exactly 31. At 31 the firmware copies without writing a NUL
  *    terminator, so the cache key ends in stack garbage and stops being deterministic.
  * 3. Over 31 characters the middle is discarded, keeping only the first 7 and last 17.
+ * 4. **The first 13 characters must be the same for every render of a screen type.** Before saving
+ *    an image the firmware deletes every cached file whose name shares its first 13 characters
+ *    (`filesystem_purge_old_file()` compares 14 bytes of `/` plus the name). That is the only thing
+ *    that ever removes an old board short of the 24h age-out. With the hash inside those 13
+ *    characters no two boards matched, a ~42 KB image piled up every minute, and the real X's flash
+ *    filled about two hours after pairing — `File writing ERROR` from `filesystem.cpp`, after which
+ *    the firmware formats its whole filesystem. Verified on the device and in source, 2026-10-12.
  *
- * The fixed 7 + 6 + 10 layout plus two separators is always 25 characters, which satisfies all
- * three by construction rather than by checking. Keep it that way — the tag length is validated
- * precisely so the total cannot drift toward 31.
+ * So the name is `<tag>-sign-<hash>-<epoch>`: 7 + 1 + 4 + 1 + 5 + 1 + 10 = 29 characters, with the
+ * tag and the fixed `sign` filling the first 13. That satisfies all four by construction rather
+ * than by checking. Keep it that way — the tag length is validated precisely so the total cannot
+ * drift toward 31.
  *
  * None of these numbers are covered by upstream tests and HEAD is itself a filesystem refactor, so
- * treat 31 / 7 / 17 / 86400 as liable to move.
+ * treat 31 / 7 / 17 / 13 / 86400 as liable to move — 13 most of all, since a change to the purge's
+ * comparison length would silently bring back the full-flash failure.
  */
 
 const TAG_LENGTH = 7;
-const HASH_LENGTH = 6;
+
+/** Pads the tag out to the 13 characters the firmware's purge treats as one screen's identity. */
+const IDENTITY_SUFFIX = 'sign';
+
+const HASH_LENGTH = 5;
 const HASH_RADIX = 36;
 const HASH_SPACE = HASH_RADIX ** HASH_LENGTH;
 
@@ -110,25 +123,6 @@ function shortHash( content, salt ) {
 }
 
 /**
- * @param {object}             options
- * @param {string}             options.tag           One of `FILENAME_TAGS`. Identifies which state
- *                                                   is being shown, so degraded screens never
- *                                                   collide with a good render.
- * @param {string|Uint8Array}  options.content       The rendered bytes, or any value that changes
- *                                                   exactly when the image does.
- * @param {number}             options.epochSeconds  When this content **first appeared** — not the
- *                                                   current time. Passing `Date.now() / 1000` on
- *                                                   every request defeats the cache entirely and
- *                                                   flashes the panel on every poll.
- * @param {string}             [options.salt]        Perturbs the name for identical content. Pass a
- *                                                   recovery generation here after any outage:
- *                                                   firmware-drawn error screens never update the
- *                                                   device's cached filename, so a recovered server
- *                                                   returning its previous name leaves the error
- *                                                   screen on the glass indefinitely.
- * @returns {string} A 25-character cache key, e.g. `departs-3f9x1a-1785564693`.
- */
-/**
  * The epoch component to pass to `buildFilename`, quantized per `EPOCH_BUCKET_SECONDS`.
  *
  * **This is not a recovery mechanism, despite looking like one.** A boundary crossing does change
@@ -151,6 +145,25 @@ export function stableEpoch( nowSeconds ) {
 	return Math.floor( shifted / EPOCH_BUCKET_SECONDS ) * EPOCH_BUCKET_SECONDS + EPOCH_BUCKET_OFFSET_SECONDS;
 }
 
+/**
+ * @param {object}             options
+ * @param {string}             options.tag           One of `FILENAME_TAGS`. Identifies which state
+ *                                                   is being shown, so degraded screens never
+ *                                                   collide with a good render.
+ * @param {string|Uint8Array}  options.content       The rendered bytes, or any value that changes
+ *                                                   exactly when the image does.
+ * @param {number}             options.epochSeconds  When this content **first appeared** — not the
+ *                                                   current time. Passing `Date.now() / 1000` on
+ *                                                   every request defeats the cache entirely and
+ *                                                   flashes the panel on every poll.
+ * @param {string}             [options.salt]        Perturbs the name for identical content. Pass a
+ *                                                   recovery generation here after any outage:
+ *                                                   firmware-drawn error screens never update the
+ *                                                   device's cached filename, so a recovered server
+ *                                                   returning its previous name leaves the error
+ *                                                   screen on the glass indefinitely.
+ * @returns {string} A 29-character cache key, e.g. `departs-sign-3f9x1-1785564693`.
+ */
 export function buildFilename( { tag, content, epochSeconds, salt = '' } ) {
 	if ( ! TAG_PATTERN.test( tag ) ) {
 		throw new TypeError(
@@ -164,5 +177,5 @@ export function buildFilename( { tag, content, epochSeconds, salt = '' } ) {
 		);
 	}
 
-	return `${ tag }-${ shortHash( content, salt ) }-${ epochSeconds }`;
+	return `${ tag }-${ IDENTITY_SUFFIX }-${ shortHash( content, salt ) }-${ epochSeconds }`;
 }

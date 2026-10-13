@@ -50,8 +50,8 @@ describe( 'currentScreen, outside the active window', () => {
 		// advances with `stableEpoch()`, whose 12-hour bucket rolls at about 02:00 Pacific — inside the
 		// sleep window, where nothing is awake to see a repaint.
 		expect( late.filename ).toBe( early.filename );
-		expect( smallHours.filename.split( '-' ).slice( 0, 2 ) ).toEqual(
-			early.filename.split( '-' ).slice( 0, 2 )
+		expect( smallHours.filename.split( '-' ).slice( 0, 3 ) ).toEqual(
+			early.filename.split( '-' ).slice( 0, 3 )
 		);
 	} );
 
@@ -94,7 +94,7 @@ describe( 'handleDisplay refresh_rate', () => {
 			const body = await bodyAt( time );
 
 			expect( body.status ).toBe( 0 );
-			expect( body.filename ).toMatch( /^[a-z0-9]{7}-[a-z0-9]{6}-\d{10}$/ );
+			expect( body.filename ).toMatch( /^[a-z0-9]{7}-sign-[a-z0-9]{5}-\d{10}$/ );
 			expect( body.refresh_rate ).toBeGreaterThanOrEqual( 1 );
 		}
 	} );

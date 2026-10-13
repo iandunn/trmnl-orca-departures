@@ -24,7 +24,7 @@ The cost of the throw is worth knowing: if an over-long schema ever did ship, mo
 
 ## Device telemetry is its own dataset
 
-`src/stats/device-telemetry.js`, dataset `trmnl_orca_departures_devices`, binding `DEVICE_TELEMETRY`. Added 2026-08-02 to fix the overflow above, and right on its own terms: these columns describe a **device**, not a request, and most rows in the requests dataset are scanner traffic where every one of them is empty.
+`src/stats/device-telemetry.js`, dataset `trmnl_orca_departures_devices_v2`, binding `DEVICE_TELEMETRY`. Added 2026-08-02 to fix the overflow above, and right on its own terms: these columns describe a **device**, not a request, and most rows in the requests dataset are scanner traffic where every one of them is empty.
 
 **`deviceId` is the MAC address, from the `ID` header, and it is the only stable per-device key.** Everything else the firmware sends describes a *kind* of device — model, geometry, firmware build — so without it two identical signs are indistinguishable, which is exactly the case the identity alarms exist to catch. **There is no serial number**; the firmware sends none, so the MAC stands in for one.
 

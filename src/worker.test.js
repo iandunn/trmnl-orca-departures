@@ -159,9 +159,11 @@ describe( '/api/display', () => {
 			const { filename } = await displayBody();
 
 			// Trailing 10 digits, or the purge reads a timestamp of 0 and deletes every cached image
-			// before each write. Exactly 31 copies without a NUL terminator.
+			// before each write. Exactly 31 copies without a NUL terminator. The first 13 characters are
+			// what the purge compares, so they must not carry the hash.
 			expect( filename ).toMatch( /\d{10}$/ );
-			expect( filename.length ).toBe( 25 );
+			expect( filename.length ).toBe( 29 );
+			expect( filename.slice( 7, 13 ) ).toBe( '-sign-' );
 			expect( filename.length ).not.toBe( 31 );
 		} );
 

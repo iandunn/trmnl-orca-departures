@@ -186,7 +186,7 @@ The first real device stalled for about five minutes at a time, a few times an h
 - **The device's own log names it.** A Device logs entry reading `HTTP GET failed after 5 attempts ... connection refused(-1)` from `src/services/http_retry_request.cpp`, with `wifi_status: connected`. The ESP32 HTTP client reports `-1` for any failure to open a connection — DNS, TCP or TLS — so "refused" is not literal.
 - **The next successful poll reports a long `Wake-Time`.** It is the milliseconds the device was awake before that request; 10-13 seconds is normal, and ~290,000 is a wake spent retrying.
 - **Ruled out:** signal (RSSI -64 to -70 on 2.4 GHz throughout) and DNS filtering (Cloudflare's filtering resolvers `1.1.1.2` and `1.1.1.3` both resolve the Worker normally).
-- **Still suspected, untested:** router security features that throttle new connections, and a DHCP-supplied resolver the router then blocks. Cloudflare also served this network from London (`colo=LHR` in `/cdn-cgi/trace`) rather than Seattle, which adds latency but did not stop a laptop on the same network connecting cleanly.
+- **Unconfirmed suspect:** a router rule forcing specific DNS servers. With it disabled the stalls stopped, but they had not returned 50 minutes after it was turned back on, so the evidence is thin either way. Router features that throttle new connections are the other candidate. Cloudflare also served this network from London (`colo=LHR` in `/cdn-cgi/trace`) rather than Seattle, which adds latency but did not stop a laptop on the same network connecting cleanly.
 
 Two things worth knowing about the data:
 
