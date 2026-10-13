@@ -16,6 +16,8 @@
  */
 
 import {
+	BLEED_LEFT,
+	BLEED_RIGHT,
 	FOOTER_BASELINE,
 	FOOTER_RULE_Y,
 	FOOTER_TEXT_SIZE,
@@ -24,6 +26,7 @@ import {
 	HEADER_WORD_SIZE,
 	PANEL_HEIGHT,
 	PANEL_WIDTH,
+	RULE,
 	headerTimeBlock,
 	text,
 } from './board.js';
@@ -116,7 +119,7 @@ export function buildNoticeSvg( notice ) {
 	return (
 		`<svg xmlns="http://www.w3.org/2000/svg" width="${ PANEL_WIDTH }" height="${ PANEL_HEIGHT }" viewBox="0 0 ${ PANEL_WIDTH } ${ PANEL_HEIGHT }">` +
 		`<rect width="${ PANEL_WIDTH }" height="${ PANEL_HEIGHT }" fill="#fff"/>` +
-		`<rect width="${ PANEL_WIDTH }" height="${ HEADER_HEIGHT }" fill="${ INK }"/>` +
+		`<rect x="${ BLEED_LEFT }" width="${ BLEED_RIGHT - BLEED_LEFT }" height="${ HEADER_HEIGHT }" fill="${ INK }"/>` +
 		text( 56, HEADER_WORD_BASELINE, HEADER_WORD_SIZE, 'Departures', { fill: '#fff' } ) +
 		headerTimeBlock( notice ) +
 		// Centred rather than left-aligned, which is the other half of "does not look like a board".
@@ -127,7 +130,7 @@ export function buildNoticeSvg( notice ) {
 		// words — the detail line below is where the sentence goes.
 		text( CENTRE, 660, 116, headline, { anchor: 'middle' } ) +
 		detailLines +
-		`<line x1="0" y1="${ FOOTER_RULE_Y }" x2="${ PANEL_WIDTH }" y2="${ FOOTER_RULE_Y }" stroke="#c0c0c0" stroke-width="2"/>` +
+		`<line x1="${ BLEED_LEFT }" y1="${ FOOTER_RULE_Y }" x2="${ BLEED_RIGHT }" y2="${ FOOTER_RULE_Y }" stroke="${ RULE }" stroke-width="2"/>` +
 		// No OneBusAway mark here: nothing on this screen came from OneBusAway, and stamping their
 		// logo on a screen that exists because we have no data from them would be a small lie.
 		text( LEFT, FOOTER_BASELINE, FOOTER_TEXT_SIZE, `Updated at ${ notice.asOf }`, {

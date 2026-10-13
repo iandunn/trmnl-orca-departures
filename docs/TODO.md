@@ -68,6 +68,13 @@ Nothing in the server work is blocked on the hardware. Everything here is. Getti
 
 - [ ] **Confirm the overnight layout, then delete the parked variants.** `badge-moon-inverse-stars` ships; the rest stay in `render/overnight.js` because switching back is one word. Judge at physical size — stars read as dust on the light panel and as sky reversed out of ink, which is why the light-with-stars pairing was dropped.
 
+
+## Phase 3 - iteration from real usage
+
+- [ ] trml x has partial refresh now - maybe it could increase battery life a lot?
+	https://youtu.be/xFEeS1IY2eE?si=a4xu6k27MpPYxmmw
+
+
 ## Housekeeping — unscheduled
 
 - [ ] **Decide whether `OUTCOMES.byosUnimplemented` still needs its retired-value comment** in `src/abuse.js`. `docs/manual-testing.md` says to settle it when the stats datasets are renamed, which happened on 2026-10-12 (`_v2`). It is still returned by `classifyRequest()`, so the value stays; only the comment's reasoning is in question.

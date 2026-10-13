@@ -38,6 +38,9 @@
 import { METRO_LOGO_DATA_URI } from '../assets/metro-logo.js';
 import { routeBadge } from '../route-badge.js';
 import {
+	BAND_FILL,
+	BLEED_LEFT,
+	BLEED_RIGHT,
 	FOOTER_BASELINE,
 	FOOTER_RULE_Y,
 	FOOTER_TEXT_SIZE,
@@ -45,6 +48,7 @@ import {
 	METRO_LOGO_BOX,
 	PANEL_HEIGHT,
 	PANEL_WIDTH,
+	RULE,
 	text,
 } from './board.js';
 
@@ -141,7 +145,7 @@ function headerLogo() {
  */
 function header( right = '' ) {
 	return (
-		`<rect width="${ PANEL_WIDTH }" height="${ HEADER_HEIGHT }" fill="${ INK }"/>` +
+		`<rect x="${ BLEED_LEFT }" width="${ BLEED_RIGHT - BLEED_LEFT }" height="${ HEADER_HEIGHT }" fill="${ INK }"/>` +
 		headerLogo() +
 		right
 	);
@@ -149,7 +153,7 @@ function header( right = '' ) {
 
 /** A hairline where the black header bar would have ended, for the variants that have no bar. */
 function headerRule( stroke ) {
-	return `<line x1="0" y1="${ HEADER_HEIGHT }" x2="${ PANEL_WIDTH }" y2="${ HEADER_HEIGHT }" stroke="${ stroke }" stroke-width="2"/>`;
+	return `<line x1="${ BLEED_LEFT }" y1="${ HEADER_HEIGHT }" x2="${ BLEED_RIGHT }" y2="${ HEADER_HEIGHT }" stroke="${ stroke }" stroke-width="2"/>`;
 }
 
 /**
@@ -168,19 +172,26 @@ function headerRule( stroke ) {
  * that line rather than additions to it. The parameter stays optional so a future variant can put it
  * somewhere else without the rule losing its footer.
  */
-function footer( label, ink = GREY, rule = '#c0c0c0' ) {
+function footer( label, ink = GREY, rule = RULE ) {
 	return (
-		`<line x1="0" y1="${ FOOTER_RULE_Y }" x2="${ PANEL_WIDTH }" y2="${ FOOTER_RULE_Y }" stroke="${ rule }" stroke-width="2"/>` +
+		`<line x1="${ BLEED_LEFT }" y1="${ FOOTER_RULE_Y }" x2="${ BLEED_RIGHT }" y2="${ FOOTER_RULE_Y }" stroke="${ rule }" stroke-width="2"/>` +
 		( label
 			? text( LEFT, FOOTER_BASELINE, FOOTER_TEXT_SIZE, `Wakes at ${ label }`, { weight: 400, fill: ink } )
 			: '' )
 	);
 }
 
+/**
+ * The whole screen. An inked background stops at `BLEED_LEFT`, like the board's header bar, so the
+ * panel's unfilled right-hand columns read as a matching margin rather than a fault.
+ */
 function panel( background, contents ) {
 	return (
 		`<svg xmlns="http://www.w3.org/2000/svg" width="${ PANEL_WIDTH }" height="${ PANEL_HEIGHT }" viewBox="0 0 ${ PANEL_WIDTH } ${ PANEL_HEIGHT }">` +
-		`<rect width="${ PANEL_WIDTH }" height="${ PANEL_HEIGHT }" fill="${ background }"/>` +
+		`<rect width="${ PANEL_WIDTH }" height="${ PANEL_HEIGHT }" fill="${ PAPER }"/>` +
+		( background === PAPER
+			? ''
+			: `<rect x="${ BLEED_LEFT }" width="${ BLEED_RIGHT - BLEED_LEFT }" height="${ PANEL_HEIGHT }" fill="${ background }"/>` ) +
 		contents +
 		`</svg>`
 	);
@@ -232,7 +243,7 @@ function rowBand( { resumeLabel } ) {
 	return panel(
 		PAPER,
 		header() +
-			`<rect x="0" y="${ bandY }" width="${ PANEL_WIDTH }" height="58" fill="#e6e6e6"/>` +
+			`<rect x="${ BLEED_LEFT }" y="${ bandY }" width="${ BLEED_RIGHT - BLEED_LEFT }" height="58" fill="${ BAND_FILL }"/>` +
 			text( LEFT, bandY + 41, 34, 'RESTING', { spacing: 2 } ) +
 			text( RIGHT, bandY + 41, 32, `Wakes at ${ resumeLabel }`, { weight: 400, fill: GREY, anchor: 'end' } ) +
 			rowRules( CENTRE_Y - 60, CENTRE_Y + 160, '#d8d8d8' ) +
@@ -319,7 +330,7 @@ function rowScheduledInverse( { resumeClock, resumeMeridiem } ) {
  */
 function tomorrowBand( y, { fill, ink } ) {
 	return (
-		`<rect x="0" y="${ y }" width="${ PANEL_WIDTH }" height="58" fill="${ fill }"/>` +
+		`<rect x="${ BLEED_LEFT }" y="${ y }" width="${ BLEED_RIGHT - BLEED_LEFT }" height="58" fill="${ fill }"/>` +
 		text( LEFT, y + 41, 34, 'FIRST DEPARTURES TOMORROW', { fill: ink, spacing: 2 } )
 	);
 }
@@ -364,7 +375,7 @@ function firstDepartures( { resumeLabel, rows = [] } ) {
 		PAPER,
 		header() +
 			moonBadge( CENTRE_X, TOMORROW_PLATE_CENTRE, TOMORROW_PLATE_WIDTH ) +
-			tomorrowBand( TOMORROW_BAND_Y, { fill: '#e6e6e6', ink: INK } ) +
+			tomorrowBand( TOMORROW_BAND_Y, { fill: BAND_FILL, ink: INK } ) +
 			firstDepartureRows( rows, { ink: PAPER, paper: INK, rule: '#e2e2e2', quiet: GREY } ) +
 			footer( resumeLabel )
 	);

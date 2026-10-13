@@ -28,6 +28,7 @@ DEV_AGENCY_ID=
 # directions are separate stops in OneBusAway, not a field on one stop.
 #
 # Kept out of the repo because a single stop implies a home address.
+# e.g., `600,430` would show 3rd Ave & Virginia St, and 3rd Ave & Pine St, respectively.
 DEV_STOP_ID=
 
 # Deployed Worker origin, e.g. https://<worker>.<subdomain>.workers.dev

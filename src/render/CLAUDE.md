@@ -217,3 +217,9 @@ On the first X it read 2 on the left and a gap even at row 0 on the right: the i
 - **The image can never be wider than the panel.** Widening it so the shift could fill the right strip crash-looped the device; see the root `CLAUDE.md`.
 - **Without widening, a shift only rescues the hidden left columns**, which sit inside a 60px margin with nothing in it. If it ever comes back, do it in the SVG rather than the pixels, so the `filename` hash sees the change, and backfill the uncovered columns white — transparent reads as black to the encoder.
 
+**What the layout does instead is make the strip look intended — variant 4, chosen 2026-10-12.** Every full-width shape — the header bar, the direction bands, the footer rule, the overnight screen's inked panel — starts at `BLEED_LEFT` (4px) rather than 0. On the glass that leaves a 2px paper gap on the left matching the hardware's 2px on the right, so both edges read as a deliberate hairline margin. Square corners. The 4 was measured on one unit and is very likely the same on every X, so it is a constant in `render/board.js` rather than config, by the owner's call.
+
+Chosen over a 24px inset, square or rounded, judged against renders that simulate the glass — the shift, the unfilled strip, and e-paper's grey-white paper rather than pure white. Those renders came from a scratch script, not from `/_preview`.
+
+**The same change darkened the direction bands to `#c8c8c8`, their text to `#111` and `#333`, and the row rules to `#8a8a8a` (`RULE`).** On e-paper, white is a grey-white, and at `#e6e6e6` the bands nearly vanished against it.
+

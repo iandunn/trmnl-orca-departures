@@ -215,7 +215,7 @@ describe( 'buildBoardSvg', () => {
 					},
 				],
 			};
-			const sizes = [ ...buildBoardSvg( board ).matchAll( /font-size="(\d+)" fill="#111">(?!Now|\d)/g ) ];
+			const sizes = [ ...buildBoardSvg( board ).matchAll( /font-weight="700" font-size="(\d+)" fill="#111">(?!Now|\d)/g ) ];
 
 			expect( sizes.length ).toBeGreaterThan( 1 );
 			expect( new Set( sizes.map( ( match ) => match[ 1 ] ) ).size ).toBe( 1 );
@@ -338,7 +338,7 @@ describe( 'buildBoardSvg', () => {
 		it( 'centres the band text in the band', () => {
 			const svg = buildBoardSvg( groupWith( [ LIVE_ROW ] ) );
 			const heading = svg.match( /<text x="60" y="(\d+)" font-family="[^"]+" font-size="32"/ );
-			const bandTop = Number( svg.match( /<rect x="0" y="(\d+)"/ )[ 1 ] );
+			const bandTop = Number( svg.match( /<rect x="\d+" y="(\d+)" width="\d+" height="58"/ )[ 1 ] );
 
 			// The band is 58 tall, and both its ends share this baseline.
 			expect( capCentre( Number( heading[ 1 ] ), 32 ) - bandTop ).toBeCloseTo( 29, 0 );

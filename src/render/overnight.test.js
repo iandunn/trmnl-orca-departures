@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { overnightScreen } from '../byos/screens.js';
 import { readConfig } from '../config.js';
 import { FILENAME_TAGS } from '../filename.js';
+import { BAND_FILL } from './board.js';
 import {
 	buildOvernightSvg,
 	DEFAULT_OVERNIGHT_VARIANT,
@@ -63,7 +64,7 @@ describe( 'buildOvernightSvg', () => {
 	} );
 
 	it( 'draws no direction bands and no stop name', () => {
-		expect( svg ).not.toContain( '#e6e6e6' );
+		expect( svg ).not.toContain( BAND_FILL );
 		expect( svg ).not.toContain( '1_600' );
 	} );
 

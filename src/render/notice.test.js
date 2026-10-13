@@ -93,10 +93,10 @@ describe( 'buildNoticeSvg', () => {
 		const board = buildBoardSvg( BUS_BOARD );
 
 		// No direction bands, no row rules, no badges.
-		expect( svg ).not.toContain( '#e6e6e6' );
-		expect( svg ).not.toContain( 'stroke="#c0c0c0" stroke-width="2"/><line' );
+		expect( svg ).not.toContain( '#c8c8c8' );
+		expect( svg ).not.toContain( 'stroke="#8a8a8a" stroke-width="2"/><line' );
 		expect( svg ).not.toContain( '<circle' );
-		expect( board ).toContain( '#e6e6e6' );
+		expect( board ).toContain( '#c8c8c8' );
 	} );
 
 	it( 'escapes markup coming from anywhere upstream', () => {

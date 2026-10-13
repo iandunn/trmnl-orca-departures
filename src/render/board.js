@@ -34,6 +34,14 @@ export const SIGN_FONT = 'Fira Sans';
 /** Meaningful mid grey, and a lighter one that only ever means de-emphasis. */
 const GREY = '#6b6b6b';
 const FAINT = '#a6a6a6';
+
+/** Row and footer rules. Dark enough to separate rows on e-paper, whose white is a grey-white. */
+export const RULE = '#8a8a8a';
+
+/** The direction band, and the two inks set on it. */
+export const BAND_FILL = '#c8c8c8';
+const BAND_INK = '#111';
+const BAND_QUIET_INK = '#333';
 const INK = '#111';
 
 /**
@@ -59,6 +67,18 @@ function capCentredBaseline( centre, size ) {
 }
 
 export const HEADER_HEIGHT = 102;
+
+/**
+ * Where full-width shapes start and end — the header bar, the direction bands, the footer rule.
+ *
+ * Not the panel edges. The first real X draws the image 2px left of the glass, hiding the two leftmost
+ * columns and leaving two never-driven columns of paper down the right edge, which nothing can fill
+ * because an image wider than the panel crash-loops the device. Starting these shapes 4px in shows a
+ * 2px paper gap on the left to match the hardware's 2px on the right, so the gap reads as a margin
+ * rather than a fault. Measured with `calibration.js` on one unit; it is very likely the same on every X, which is why this is a constant rather than config.
+ */
+export const BLEED_LEFT = 4;
+export const BLEED_RIGHT = PANEL_WIDTH;
 const BAND_HEIGHT = 58;
 const GROUP_GAP = 30;
 const LEFT = 60;
@@ -477,20 +497,20 @@ const BAND_BASELINE = capCentredBaseline( BAND_HEIGHT / 2, BAND_TEXT_SIZE );
  */
 function headingWithName( x, y, heading, name ) {
 	if ( ! name ) {
-		return text( x, y, BAND_TEXT_SIZE, heading, { fill: '#333', spacing: 3 } );
+		return text( x, y, BAND_TEXT_SIZE, heading, { fill: BAND_INK, spacing: 3 } );
 	}
 
 	// OneBusAway leaves `stop.direction` empty for a fair number of stops — 24 of the 515 seen while
 	// surveying, one of them a Link platform — and `directionLabel()` honestly returns nothing for
 	// those. The name then takes the whole slot rather than sitting indented behind an empty label.
 	if ( ! heading ) {
-		return text( x, y, BAND_TEXT_SIZE, name, { weight: 400, fill: GREY } );
+		return text( x, y, BAND_TEXT_SIZE, name, { weight: 400, fill: BAND_QUIET_INK } );
 	}
 
 	return (
-		`<text x="${ x }" y="${ y }" font-family="${ SIGN_FONT }" font-size="${ BAND_TEXT_SIZE }" fill="#333">` +
+		`<text x="${ x }" y="${ y }" font-family="${ SIGN_FONT }" font-size="${ BAND_TEXT_SIZE }" fill="${ BAND_INK }">` +
 		`<tspan font-weight="700" letter-spacing="3">${ escapeText( heading ) }</tspan>` +
-		`<tspan dx="26" font-weight="400" fill="${ GREY }">${ escapeText( name ) }</tspan>` +
+		`<tspan dx="26" font-weight="400" fill="${ BAND_QUIET_INK }">${ escapeText( name ) }</tspan>` +
 		`</text>`
 	);
 }
@@ -506,9 +526,9 @@ function headingWithName( x, y, heading, name ) {
  */
 function directionBand( group, y ) {
 	return (
-		`<rect x="0" y="${ y }" width="${ PANEL_WIDTH }" height="${ BAND_HEIGHT }" fill="#e6e6e6"/>` +
+		`<rect x="${ BLEED_LEFT }" y="${ y }" width="${ BLEED_RIGHT - BLEED_LEFT }" height="${ BAND_HEIGHT }" fill="${ BAND_FILL }"/>` +
 		headingWithName( LEFT, y + BAND_BASELINE, group.heading.toUpperCase(), group.name ) +
-		text( RIGHT, y + BAND_BASELINE, BAND_TEXT_SIZE, group.stop, { weight: 400, fill: GREY, anchor: 'end' } )
+		text( RIGHT, y + BAND_BASELINE, BAND_TEXT_SIZE, group.stop, { weight: 400, fill: BAND_QUIET_INK, anchor: 'end' } )
 	);
 }
 
@@ -738,7 +758,7 @@ export function buildBoardSvg( board ) {
 			}
 
 			if ( rowIndex < group.rows.length - 1 ) {
-				body += `<line x1="${ LEFT }" y1="${ y + rowHeight }" x2="${ RIGHT }" y2="${ y + rowHeight }" stroke="#c0c0c0" stroke-width="2"/>`;
+				body += `<line x1="${ LEFT }" y1="${ y + rowHeight }" x2="${ RIGHT }" y2="${ y + rowHeight }" stroke="${ RULE }" stroke-width="2"/>`;
 			}
 
 			y += rowHeight;
@@ -750,11 +770,11 @@ export function buildBoardSvg( board ) {
 	return (
 		`<svg xmlns="http://www.w3.org/2000/svg" width="${ PANEL_WIDTH }" height="${ PANEL_HEIGHT }" viewBox="0 0 ${ PANEL_WIDTH } ${ PANEL_HEIGHT }">` +
 		`<rect width="${ PANEL_WIDTH }" height="${ PANEL_HEIGHT }" fill="#fff"/>` +
-		`<rect width="${ PANEL_WIDTH }" height="${ HEADER_HEIGHT }" fill="${ INK }"/>` +
+		`<rect x="${ BLEED_LEFT }" width="${ BLEED_RIGHT - BLEED_LEFT }" height="${ HEADER_HEIGHT }" fill="${ INK }"/>` +
 		lockup +
 		headerTimeBlock( board ) +
 		body +
-		`<line x1="0" y1="${ FOOTER_RULE_Y }" x2="${ PANEL_WIDTH }" y2="${ FOOTER_RULE_Y }" stroke="#c0c0c0" stroke-width="2"/>` +
+		`<line x1="${ BLEED_LEFT }" y1="${ FOOTER_RULE_Y }" x2="${ BLEED_RIGHT }" y2="${ FOOTER_RULE_Y }" stroke="${ RULE }" stroke-width="2"/>` +
 		// The whole defence against a silently frozen panel. Metro's signs are wired and monitored;
 		// ours can fail with no way to say so, and this is the only cue that survives that. It starts
 		// at the left margin rather than clearing a logo, so the words get the full footer width.

@@ -141,7 +141,7 @@ Nothing deployment-specific is a literal in the code; `readConfig()` in `src/con
 
 ### Checking how the image sits on your panel
 
-The first TRMNL X drew the image 2px to the left of the glass: the two leftmost columns were hidden under the bezel, and a white strip showed down the right edge. Nothing compensates for that, because nothing can fill the right strip — an image wider than the panel crash-loops the device — and the layout keeps a wide margin on both sides anyway. To see how yours sits:
+The first TRMNL X drew the image 2px to the left of the glass: the two leftmost columns were hidden under the bezel, and a white strip showed down the right edge. Nothing can fill the right strip — an image wider than the panel crash-loops the device — so the layout starts its full-width shapes at `BLEED_LEFT` in `src/render/board.js`, 4px in, which shows a matching 2px gap on the left. If your panel sits differently, change that constant. To see how yours sits:
 
 1. During the sign's active hours, set `CALIBRATION_SCREEN = "true"` and deploy. On the next poll the sign shows rows of black bars at both side edges, each row's bars inset by the number of pixels on its label.
 2. On each side, read the first row with a clear white gap between bar and bezel. Row 1 on both sides means the image is centred. A first gap at row *n* on the left, with a gap even on row 0 on the right, means the image is shifted *n* pixels left.
