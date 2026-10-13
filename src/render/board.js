@@ -69,15 +69,23 @@ function capCentredBaseline( centre, size ) {
 export const HEADER_HEIGHT = 102;
 
 /**
+ * How the first real X places the image on its glass: about this many columns hidden under the bezel
+ * on the left, and a strip of never-driven paper about this wide on the right. Judged by eye on the
+ * glass, since no image can reach the right strip to measure it. `/_preview` draws its renders with
+ * the same numbers, so changing them here keeps the preview honest.
+ */
+export const GLASS_HIDDEN_LEFT = 3;
+export const GLASS_STRIP_RIGHT = 4;
+
+/**
  * Where full-width shapes start and end — the header bar, the direction bands, the footer rule.
  *
- * Not the panel edges. The first real X draws the image 2px left of the glass, hiding the two leftmost
- * columns and leaving two never-driven columns of paper down the right edge, which nothing can fill
- * because an image wider than the panel crash-loops the device. Starting these shapes 4px in shows a
- * 2px paper gap on the left to match the hardware's 2px on the right, so the gap reads as a margin
- * rather than a fault. Measured with `calibration.js` on one unit; it is very likely the same on every X, which is why this is a constant rather than config.
+ * Not the panel edges. Nothing can fill the right strip, because an image wider than the panel
+ * crash-loops the device, so the left edge is given a matching gap instead and both read as a
+ * margin rather than a fault. Very likely the same on every X, which is why this is a constant
+ * rather than config.
  */
-export const BLEED_LEFT = 4;
+export const BLEED_LEFT = GLASS_HIDDEN_LEFT + GLASS_STRIP_RIGHT;
 export const BLEED_RIGHT = PANEL_WIDTH;
 const BAND_HEIGHT = 58;
 const GROUP_GAP = 30;
