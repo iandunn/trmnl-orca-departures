@@ -14,7 +14,8 @@
 		"secret:list": "set -a && . ./.cloudflare.env && set +a && wrangler secret list",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"lint": "eslint ."
+		"lint": "eslint .",
+		"screenshots": "node src/dev/readme-screenshots.js"
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",

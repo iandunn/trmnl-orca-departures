@@ -11,12 +11,13 @@
 
 import { currentScreen } from '../byos/display.js';
 import { readConfig } from '../config.js';
-import { GLASS_HIDDEN_LEFT, GLASS_STRIP_RIGHT, PANEL_WIDTH } from '../render/board.js';
+import { GLASS_HIDDEN_LEFT, PANEL_WIDTH } from '../render/board.js';
 import { rasterize, renderBoard } from '../render/index.js';
 import { buildMockStatsData, buildUnpairedMockStatsData, renderStatsHtml } from '../stats/render.js';
 import { runByosChecks } from './byos-check.js';
 import { renderByosCheckHtml } from './byos-page.js';
 import { edgeCaseBoards } from './edge-case-boards.js';
+import { EPAPER_INK, EPAPER_PAPER, GLASS_WIDTH } from './epaper.js';
 import { overnightSamples, parkedOvernightSamples } from './overnight-samples.js';
 import { sampleBoards } from './sample-boards.js';
 
@@ -79,20 +80,10 @@ function requestedTime( url ) {
 }
 
 /**
- * Shows each render as the glass does rather than as a monitor does.
- *
- * E-paper has no true white or black: an image's white is the panel's grey-white paper and its black a
- * slightly soft ink. Judged on pure white, a light tint like a direction band looks far more visible
- * than it is on the device. This maps every pixel linearly between approximations of the two, and the
- * glass constants below crop and offset the image the way the panel does. Page only — the PNG routes
- * still serve the exact bytes the device receives.
+ * Shows each render as the glass does rather than as a monitor does, with the same approximation the
+ * README screenshots use — see `epaper.js`. Done in the browser as a colour filter plus a crop, so it
+ * is page only: the PNG routes still serve the exact bytes the device receives.
  */
-const EPAPER_PAPER = [ 218, 217, 210 ];
-const EPAPER_INK = [ 38, 38, 38 ];
-
-/** The visible glass, in image pixels. The two estimates come from `render/board.js`. */
-const GLASS_WIDTH = PANEL_WIDTH - GLASS_HIDDEN_LEFT + GLASS_STRIP_RIGHT;
-
 const EPAPER_FILTER =
 	'<svg width="0" height="0" style="position:absolute"><filter id="epaper" color-interpolation-filters="sRGB"><feComponentTransfer>' +
 	[ 'R', 'G', 'B' ]
