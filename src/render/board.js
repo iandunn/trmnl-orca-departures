@@ -71,8 +71,8 @@ export const HEADER_HEIGHT = 102;
 /**
  * How the first real X places the image on its glass: about this many columns hidden under the bezel
  * on the left, and a strip of never-driven paper about this wide on the right. Judged by eye on the
- * glass, since no image can reach the right strip to measure it. `/_preview` and the README
- * screenshots draw the glass with these, through `src/dev/epaper.js`; the device never uses them.
+ * glass, since no image can reach the right strip to measure it. Recorded rather than used: nothing
+ * draws them, so they are here for whoever reconsiders `BLEED_LEFT` below.
  */
 export const GLASS_HIDDEN_LEFT = 3;
 export const GLASS_STRIP_RIGHT = 5;

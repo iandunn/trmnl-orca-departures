@@ -1,9 +1,9 @@
 /**
  * Regenerates `assets/bus.png` and `assets/light-rail.png`, the README's screenshots.
  *
- * They show the sample boards as the glass shows them — e-paper colours and the panel's crop, via
- * `epaper.js` — rather than the raw bytes the device receives, because a picture of the sign is for
- * people deciding what it looks like. The raw render is one click away on `/_preview`.
+ * They show the sample boards in e-paper colours, via `epaper.js`, rather than the raw bytes the
+ * device receives, because a picture of the sign is for people deciding what it looks like. The raw
+ * render is one click away on `/_preview`.
  *
  * Run with `npm run screenshots` whenever the rendered design changes, and update the README's alt
  * text in the same commit.
@@ -14,7 +14,7 @@ import { deflateSync } from 'node:zlib';
 import { initWasm, Resvg } from '@resvg/resvg-wasm';
 import { buildBoardSvg, PANEL_HEIGHT, PANEL_WIDTH, SIGN_FONT } from '../render/board.js';
 import { quantizeToScanlines } from '../render/png.js';
-import { onGlass } from './epaper.js';
+import { inEpaperColours } from './epaper.js';
 import { BUS_BOARD, RAIL_BOARD } from './sample-boards.js';
 
 const root = new URL( '../../', import.meta.url );
@@ -30,9 +30,9 @@ for ( const [ name, board ] of [ [ 'bus', BUS_BOARD ], [ 'light-rail', RAIL_BOAR
 		font: { fontBuffers: fonts, defaultFontFamily: SIGN_FONT },
 	} ).render().pixels;
 
-	const glass = onGlass( quantizeToScanlines( pixels, PANEL_WIDTH, PANEL_HEIGHT ), PANEL_WIDTH, PANEL_HEIGHT );
+	const rgb = inEpaperColours( quantizeToScanlines( pixels, PANEL_WIDTH, PANEL_HEIGHT ), PANEL_WIDTH, PANEL_HEIGHT );
 
-	writeFileSync( new URL( `assets/${ name }.png`, root ), rgbPng( glass.rgb, glass.width, glass.height ) );
+	writeFileSync( new URL( `assets/${ name }.png`, root ), rgbPng( rgb, PANEL_WIDTH, PANEL_HEIGHT ) );
 }
 
 /** A plain 8-bit RGB PNG. Not the device's encoder, which only does 4-bit greyscale. */

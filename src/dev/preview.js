@@ -11,13 +11,12 @@
 
 import { currentScreen } from '../byos/display.js';
 import { readConfig } from '../config.js';
-import { GLASS_HIDDEN_LEFT, PANEL_WIDTH } from '../render/board.js';
 import { rasterize, renderBoard } from '../render/index.js';
 import { buildMockStatsData, buildUnpairedMockStatsData, renderStatsHtml } from '../stats/render.js';
 import { runByosChecks } from './byos-check.js';
 import { renderByosCheckHtml } from './byos-page.js';
 import { edgeCaseBoards } from './edge-case-boards.js';
-import { EPAPER_INK, EPAPER_PAPER, GLASS_WIDTH } from './epaper.js';
+import { EPAPER_INK, EPAPER_PAPER } from './epaper.js';
 import { overnightSamples, parkedOvernightSamples } from './overnight-samples.js';
 import { sampleBoards } from './sample-boards.js';
 
@@ -80,9 +79,9 @@ function requestedTime( url ) {
 }
 
 /**
- * Shows each render as the glass does rather than as a monitor does, with the same approximation the
- * README screenshots use — see `epaper.js`. Done in the browser as a colour filter plus a crop, so it
- * is page only: the PNG routes still serve the exact bytes the device receives.
+ * Shows each render in e-paper colours rather than as a monitor does, with the same approximation the
+ * README screenshots use — see `epaper.js`. Done in the browser as a colour filter, so it is page
+ * only: the PNG routes still serve the exact bytes the device receives.
  */
 const EPAPER_FILTER =
 	'<svg width="0" height="0" style="position:absolute"><filter id="epaper" color-interpolation-filters="sRGB"><feComponentTransfer>' +
@@ -102,7 +101,7 @@ function contactSheet( boards, nowParam, { heading = '', extraNav = '' } = {} ) 
 		( sample ) =>
 			`<figure id="${ sample.slug }"><figcaption><span>${ sample.title }</span>` +
 			`<a href="${ PREVIEW_PREFIX }/${ sample.slug }.png" download="${ sample.slug }.png">download png</a></figcaption>` +
-			`<div class="glass"><img src="${ PREVIEW_PREFIX }/${ sample.slug }.png?t=${ stamp }${ carried }" alt="${ sample.title }"></div></figure>`
+			`<img src="${ PREVIEW_PREFIX }/${ sample.slug }.png?t=${ stamp }${ carried }" alt="${ sample.title }"></figure>`
 	).join( '' );
 
 	const nav = boards.map(
@@ -122,9 +121,7 @@ function contactSheet( boards, nowParam, { heading = '', extraNav = '' } = {} ) 
 		// Well under native width: at 1872 the panel fills the screen and you cannot judge it as a
 		// whole object, which is how it will actually be read.
 		`:root{--w:940px}` +
-		// The image is cropped and offset inside a paper-coloured frame the width of the visible glass.
-		`.glass{max-width:var(--w);overflow:hidden;background:rgb(${ EPAPER_PAPER.join( ',' ) });box-shadow:0 2px 12px rgba(0,0,0,.5)}` +
-		`.glass img{display:block;width:${ ( ( PANEL_WIDTH / GLASS_WIDTH ) * 100 ).toFixed( 4 ) }%;margin-left:-${ ( ( GLASS_HIDDEN_LEFT / GLASS_WIDTH ) * 100 ).toFixed( 4 ) }%;filter:url(#epaper)}` +
+		`figure img{display:block;width:100%;max-width:var(--w);box-shadow:0 2px 12px rgba(0,0,0,.5);filter:url(#epaper)}` +
 		`</style>` +
 		EPAPER_FILTER +
 		`<h1>${ heading || '1872 &times; 1404 &middot; 4-bit greyscale &middot; shown at 50% &middot; reload to re-render' }</h1>` +
