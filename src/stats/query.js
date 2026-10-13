@@ -149,6 +149,19 @@ export async function buildStatsData( env, config, rangeKey ) {
 	// on a panel of -1 by -1, which reads as a device in trouble rather than as no device at all.
 	const deviceDataset = env?.DEVICE_TELEMETRY_DATASET || 'trmnl_orca_departures_devices_v2';
 
+	// **Image, setup and log rows are excluded from every panel describing what a device reported.**
+	// Every wake downloads the image a second after it polls, and that request carries only `ID` and
+	// `Access-Token`, so it records `-1` for firmware, model, geometry, battery and WiFi. Unfiltered,
+	// those rows made the newest reading blank and showed one device as two "firmware combinations".
+	// Excluding rather than keeping only `byos-display` matters: a poll with a mistyped stop or a stale
+	// key is recorded as `bad-request` or `byos-bad-access-token`, still carries every header, and is
+	// exactly when the owner needs these panels.
+	const devicePollsOnly = `${ deviceBlobColumn( 'outcome' ) } NOT IN ('${ OUTCOMES.byosImage }', '${ OUTCOMES.byosSetup }', '${ OUTCOMES.byosLog }')`;
+
+	// The firmware and geometry alarm keeps setup rows, which carry `FW-Version` and `Model`: a second
+	// device enrolling with a leaked URL has to trip it before its first poll, not after.
+	const deviceIdentityRows = `${ deviceBlobColumn( 'outcome' ) } NOT IN ('${ OUTCOMES.byosImage }', '${ OUTCOMES.byosLog }')`;
+
 	const days = range.days;
 
 	const authorizedOnly = `${ blobColumn( 'authorized' ) } = '1'`;
@@ -202,6 +215,7 @@ export async function buildStatsData( env, config, rangeKey ) {
 					deviceDoubleColumn( 'width' ),
 					deviceDoubleColumn( 'height' ),
 				],
+				where: deviceIdentityRows,
 				days,
 			} )
 		),
@@ -214,6 +228,7 @@ export async function buildStatsData( env, config, rangeKey ) {
 			groupQuery( {
 				dataset: deviceDataset,
 				columns: [ deviceBlobColumn( 'deviceId' ), deviceBlobColumn( 'imageCached' ) ],
+				where: devicePollsOnly,
 				days,
 			} )
 		),
@@ -222,6 +237,7 @@ export async function buildStatsData( env, config, rangeKey ) {
 			groupQuery( {
 				dataset: deviceDataset,
 				columns: [ deviceBlobColumn( 'deviceId' ), deviceDoubleColumn( 'refreshRateEcho' ) ],
+				where: devicePollsOnly,
 				days,
 			} )
 		),
@@ -260,14 +276,7 @@ export async function buildStatsData( env, config, rangeKey ) {
 		// `argMax` per column, which this SQL surface may or may not support, and the aggregate a
 		// `GROUP BY` can give — an average battery voltage — is not what a device panel is asking for.
 		// Fifty rows is enough to cover several devices' last poll each, and the per-device snapshot is
-		// assembled in JS below.
-		//
-		// **Image, setup and log rows are excluded.** Every wake downloads the image a second after it
-		// polls, and that request carries only `ID` and `Access-Token`, so without the filter the newest
-		// row is almost always one with no battery, WiFi or firmware reading on it. Excluding rather than
-		// keeping only `byos-display` matters: a poll with a mistyped stop or a stale key is recorded as
-		// `bad-request` or `byos-bad-access-token`, still carries every header, and is exactly when the
-		// owner needs the box.
+		// assembled in JS below. Filtered by `devicePollsOnly`, like every device-reading panel.
 		run( `
 			SELECT
 				timestamp,
@@ -297,7 +306,7 @@ export async function buildStatsData( env, config, rangeKey ) {
 				${ deviceDoubleColumn( 'height' ) } AS height
 			FROM ${ deviceDataset }
 			WHERE timestamp > NOW() - INTERVAL '${ days }' DAY
-				AND ${ deviceBlobColumn( 'outcome' ) } NOT IN ('${ OUTCOMES.byosImage }', '${ OUTCOMES.byosSetup }', '${ OUTCOMES.byosLog }')
+				AND ${ devicePollsOnly }
 			ORDER BY timestamp DESC
 			LIMIT 50
 		` ),
