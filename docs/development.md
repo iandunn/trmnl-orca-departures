@@ -131,7 +131,9 @@ The dataset keeps `source_path` and `source_line` — together they name the exa
 
 `/api/display` and `/image` feed the same history from the other side, recording the `FILENAME_TAGS` tag of the screen they served. That is what answers "what was actually on the glass at 3am", which neither the console nor the device can tell you.
 
-Both `npm run tail` and `npm run deploy` need Cloudflare credentials in the environment, which is still an open question — `.cloudflare.env` holds them and nothing loads it yet.
+Both `npm run tail` and `npm run deploy` load Cloudflare credentials from `.cloudflare.env` themselves; see `CLAUDE.md` for why nothing else may.
+
+**`wrangler tail` drops events.** Against the real device it missed both an `/api/display` poll and an image download that demonstrably happened, so the absence of a request in the tail is not evidence the device did not make one. `/stats` is the complete record.
 
 **Never log a raw request path.** The device token is a path segment, so a logged URL puts the shared secret straight into the log stream, which is exactly where people paste when debugging. `redactPath()` in `src/routing.js` hashes both the token and the stop and exists for this.
 

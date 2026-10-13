@@ -1025,7 +1025,7 @@ function deviceBox( device, panelData, battery ) {
 		],
 		[ 'Upstream on that poll', device.upstreamReason || 'every stop answered' ],
 		[ 'Woke because', device.updateSource || 'not reported' ],
-		[ 'Awake last cycle', device.wakeTime ? `${ device.wakeTime } ms` : 'not reported' ],
+		[ 'Awake before last poll', device.wakeTime ? `${ device.wakeTime } ms` : 'not reported' ],
 		[ 'Image cached', deviceFlag( device.imageCached ) ],
 		[
 			'Refresh rate it echoed',

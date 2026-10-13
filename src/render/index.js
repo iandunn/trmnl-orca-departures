@@ -39,7 +39,8 @@ export async function rasterize( svg ) {
 	wasmReady ??= initWasm( resvgWasm );
 	await wasmReady;
 
-	// `.pixels`, never `.asPng()` — see png.js for why.
+	// `.pixels`, never `.asPng()` — see png.js for why. Always encoded at the panel size, so a render of
+	// any other size throws and fails as a 500: an image wider than the panel crash-loops the X.
 	const pixels = new Resvg( svg, fontOptions() ).render().pixels;
 
 	return encodeGreyscalePng( pixels, PANEL_WIDTH, PANEL_HEIGHT );

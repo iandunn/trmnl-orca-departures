@@ -47,6 +47,11 @@ ACTIVE_END = "21:30"
 # number rather than adding one.
 REFRESH_ACTIVE_SECONDS = 60
 
+# Seconds the device spends awake between our response and its next request: finishing the image
+# download and paint, then waking and rejoining WiFi. Subtracted from each sleep so polls land just
+# after each minute turns rather than drifting through it. Measured at ~12 on a TRMNL X over 2.4 GHz.
+REFRESH_WAKE_LEAD_SECONDS = 12
+
 # The regional OneBusAway deployment. Only Puget Sound has been tested.
 OBA_BASE_URL = "https://api.pugetsound.onebusaway.org/api/where"
 
@@ -59,6 +64,11 @@ OBA_BASE_URL = "https://api.pugetsound.onebusaway.org/api/where"
 # The tradeoff is concurrency — a held request occupies a Worker invocation, so a large enough flood
 # could crowd out the device's own poll. Lower this if that ever happens; 0 disables the delay.
 TARPIT_MS = 25000
+
+# Replaces every screen but the malformed-URL one with an edge test pattern, for finding which columns
+# at the panel's sides are visible. Set to "true" and deploy during the sign's active hours, read it off
+# the glass, then set it back and deploy again.
+CALIBRATION_SCREEN = "false"
 
 # `CLOUDFLARE_ACCOUNT_ID` is deliberately NOT here, even though it is not a credential.
 #

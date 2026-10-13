@@ -81,7 +81,9 @@ To confirm the deployment answers correctly before you pair anything to it, [man
 
 ## 4. Point your TRMNL at it
 
-The device's WiFi captive portal is the only way to set the server URL — there is no dashboard setting and no build flag. Enter:
+The device's WiFi captive portal is the only way to set the server URL — there is no dashboard setting and no build flag. Settings on trmnl.com, such as its refresh rate, do not apply either: in BYOS mode TRMNL's own server is never contacted, and the device sleeps for whatever `refresh_rate` this Worker returns.
+
+To reach the portal on a TRMNL X that is already set up, put it into WiFi pairing mode: hold both ends of the touch bar until the screen blinks, then hold the middle. Join the TRMNL network it broadcasts from a phone, open **Advanced**, set **Custom Server** to **Yes**, and enter:
 
 ```
 https://<your-worker>.workers.dev/token/<your-token>/agency/<agency>/stop/<stopId>[,<stopId>]
@@ -117,11 +119,33 @@ Everything the device fetches lives under that prefix, images included: the firm
 
 | Kind | Home |
 | --- | --- |
-| Secrets — `DEVICE_TOKEN`, `OBA_API_KEY`, `STATS_PASSWORD`, `ANALYTICS_API_TOKEN` | `npx wrangler secret put`, or `.dev.vars` locally |
+| Secrets — `DEVICE_TOKEN`, `OBA_API_KEY`, `STATS_PASSWORD`, `ANALYTICS_API_TOKEN` | `npm run secret -- NAME`, or `.dev.vars` locally |
+| Neither secret nor publishable — `DIRECTION_OVERRIDES`, `CLOUDFLARE_ACCOUNT_ID` | Same as secrets |
 | Privacy-sensitive — agency, stop IDs | A path segment of the device's base URL |
-| Everything else — schedule, timezone, labels, `CLOUDFLARE_ACCOUNT_ID` | `[vars]` in `wrangler.toml` |
+| Everything else — schedule, timezone, panel fit | `[vars]` in `wrangler.toml` |
 
-The `[vars]` block holds the timezone, the active window, both refresh rates, the bot-tarpit duration and the OneBusAway base URL. It is committed, so a fork edits one file and redeploys. Nothing deployment-specific is a literal in the code; `readConfig()` in `src/config.js` is the only reader, and it coerces and range-checks every value, falling back to a default rather than throwing — `/api/display` runs about 1440 times a day, and a config error there is a flat battery rather than a 500 someone notices.
+The `[vars]` block is committed, so a fork edits one file and redeploys. Each var is commented in place; in brief:
+
+| Var | What it sets |
+| --- | --- |
+| `TIMEZONE` | The IANA zone everything is displayed and scheduled in |
+| `ACTIVE_START`, `ACTIVE_END` | The daily window the sign is awake; outside it, one sleep until morning |
+| `REFRESH_ACTIVE_SECONDS` | Seconds between polls while awake |
+| `REFRESH_WAKE_LEAD_SECONDS` | How long your device spends waking, downloading and painting; subtracted so polls land just after each minute. Measured at ~12 on a TRMNL X over 2.4 GHz |
+| `OBA_BASE_URL` | The regional OneBusAway deployment |
+| `TARPIT_MS` | How long scanner traffic is held before its 404 |
+| `CALIBRATION_SCREEN` | `"true"` replaces the board with the edge test pattern |
+| `ANALYTICS_DATASET` and friends | Analytics Engine dataset names; must match the bindings below them |
+
+Nothing deployment-specific is a literal in the code; `readConfig()` in `src/config.js` is the only reader, and it coerces and range-checks every value, falling back to a default rather than throwing — `/api/display` runs about 1440 times a day, and a config error there is a flat battery rather than a 500 someone notices.
+
+### Checking how the image sits on your panel
+
+The first TRMNL X drew the image 2px to the left of the glass: the two leftmost columns were hidden under the bezel, and a white strip showed down the right edge. Nothing compensates for that, because nothing can fill the right strip — an image wider than the panel crash-loops the device — and the layout keeps a wide margin on both sides anyway. To see how yours sits:
+
+1. During the sign's active hours, set `CALIBRATION_SCREEN = "true"` and deploy. On the next poll the sign shows rows of black bars at both side edges, each row's bars inset by the number of pixels on its label.
+2. On each side, read the first row with a clear white gap between bar and bezel. Row 1 on both sides means the image is centred. A first gap at row *n* on the left, with a gap even on row 0 on the right, means the image is shifted *n* pixels left.
+3. Set `CALIBRATION_SCREEN = "false"` and deploy again.
 
 ### Direction labels, and overriding them per stop
 
@@ -154,6 +178,15 @@ It answers four questions, in the order they matter:
 **Is something misconfigured?** A valid token with an unusable stop ID lands in the Configuration errors panel with the reason and the stop, which is the fastest way to catch a typo made at the captive portal.
 
 **What did the device itself say?** The Device logs panel keeps everything the sign POSTs to `/api/log`, including the `source_path` and `source_line` that name the exact line of firmware that failed, and the free-heap figure that catches the out-of-memory path — one of the modes that draws nothing at all, forever. `npm run tail` shows the same entries live, which is what you want while standing at the sign; this panel is what you want on Thursday when you are asking what happened on Tuesday.
+
+### When the sign stops updating
+
+The first real device stalled for about five minutes at a time, a few times an hour, with every request that reached the Worker answered normally. What that looks like, and what was ruled out, so the next diagnosis starts further along:
+
+- **The device's own log names it.** A Device logs entry reading `HTTP GET failed after 5 attempts ... connection refused(-1)` from `src/services/http_retry_request.cpp`, with `wifi_status: connected`. The ESP32 HTTP client reports `-1` for any failure to open a connection — DNS, TCP or TLS — so "refused" is not literal.
+- **The next successful poll reports a long `Wake-Time`.** It is the milliseconds the device was awake before that request; 10-13 seconds is normal, and ~290,000 is a wake spent retrying.
+- **Ruled out:** signal (RSSI -64 to -70 on 2.4 GHz throughout) and DNS filtering (Cloudflare's filtering resolvers `1.1.1.2` and `1.1.1.3` both resolve the Worker normally).
+- **Still suspected, untested:** router security features that throttle new connections, and a DHCP-supplied resolver the router then blocks. Cloudflare also served this network from London (`colo=LHR` in `/cdn-cgi/trace`) rather than Seattle, which adds latency but did not stop a laptop on the same network connecting cleanly.
 
 Two things worth knowing about the data:
 

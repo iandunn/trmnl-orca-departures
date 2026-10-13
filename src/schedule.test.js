@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { CONFIG_DEFAULTS, readConfig } from './config.js';
-import { currentSchedule, isWithinActiveWindow, nextOccurrenceMs, SCHEDULE_MODES } from './schedule.js';
+import {
+	alignedSleepSeconds,
+	currentSchedule,
+	isWithinActiveWindow,
+	nextOccurrenceMs,
+	SCHEDULE_MODES,
+} from './schedule.js';
 
 const TIMEZONE = CONFIG_DEFAULTS.timezone;
 
@@ -70,12 +76,60 @@ describe( 'nextOccurrenceMs', () => {
 	} );
 } );
 
+describe( 'alignedSleepSeconds', () => {
+	// Sleep plus the wake lead is when the next request arrives, so that sum is what has to land.
+	function nextPollAt( nowMs, period, lead ) {
+		return nowMs + ( alignedSleepSeconds( nowMs, period, lead ) + lead ) * 1000;
+	}
+
+	it( 'lands the next poll a few seconds after the next minute turns', () => {
+		const nowMs = pacific( '2026-08-01T12:00:05', 7 );
+
+		expect( nextPollAt( nowMs, 60, 12 ) ).toBe( pacific( '2026-08-01T12:01:03', 7 ) );
+	} );
+
+	it( 'holds every poll on the minute once it is there', () => {
+		let nowMs = pacific( '2026-08-01T12:00:03', 7 );
+
+		for ( let poll = 1; poll <= 5; poll++ ) {
+			nowMs = nextPollAt( nowMs, 60, 12 );
+
+			expect( nowMs ).toBe( pacific( `2026-08-01T12:0${ poll }:03`, 7 ) );
+		}
+	} );
+
+	// A poll arriving just before the minute must not wake again seconds later for the boundary.
+	it( 'skips to the following minute rather than taking a short nap', () => {
+		const nowMs = pacific( '2026-08-01T12:00:55', 7 );
+
+		expect( alignedSleepSeconds( nowMs, 60, 12 ) ).toBeGreaterThanOrEqual( 5 );
+		expect( nextPollAt( nowMs, 60, 12 ) ).toBe( pacific( '2026-08-01T12:02:03', 7 ) );
+	} );
+
+	// A slow WiFi join must cost one late board, not a skipped minute.
+	it( 'still reaches the next minute after a late wake', () => {
+		for ( const second of [ 25, 41, 45 ] ) {
+			const late = pacific( `2026-08-01T12:00:${ second }`, 7 );
+
+			expect( nextPollAt( late, 60, 12 ) ).toBe( pacific( '2026-08-01T12:01:03', 7 ) );
+		}
+	} );
+
+	it( 'never returns less than one second, whatever the lead', () => {
+		const nowMs = pacific( '2026-08-01T12:00:00', 7 );
+
+		for ( const lead of [ 0, 12, 59, 60, 600 ] ) {
+			expect( alignedSleepSeconds( nowMs, 60, lead ) ).toBeGreaterThanOrEqual( 1 );
+		}
+	} );
+} );
+
 describe( 'currentSchedule', () => {
-	it( 'polls at the active rate inside the window', () => {
-		const schedule = currentSchedule( { nowMs: pacific( '2026-08-01T12:00:00', 7 ), config } );
+	it( 'polls on the minute inside the window', () => {
+		const schedule = currentSchedule( { nowMs: pacific( '2026-08-01T12:00:20', 7 ), config } );
 
 		expect( schedule.mode ).toBe( SCHEDULE_MODES.active );
-		expect( schedule.refreshSeconds ).toBe( config.refreshActiveSeconds );
+		expect( schedule.refreshSeconds ).toBe( 40 + 3 - config.wakeLeadSeconds );
 		expect( schedule.resumeAtMs ).toBeNull();
 	} );
 

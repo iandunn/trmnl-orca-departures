@@ -32,8 +32,10 @@ export const CONFIG_DEFAULTS = {
 	activeStart: '06:30',
 	activeEnd: '21:30',
 	refreshActiveSeconds: 60,
+	wakeLeadSeconds: 12,
 	obaBaseUrl: 'https://api.pugetsound.onebusaway.org/api/where',
 	tarpitMs: 25000,
+	calibrationScreen: false,
 };
 
 /**
@@ -158,6 +160,15 @@ function stopLabelMap( value ) {
 	}
 }
 
+/** `true` or `1`, in either type a var can arrive as; anything else is off. */
+function flag( value, fallback ) {
+	if ( value === undefined || value === null || value === '' ) {
+		return fallback;
+	}
+
+	return [ 'true', '1' ].includes( String( value ).trim().toLowerCase() );
+}
+
 /** OBA paths are appended to this, and the firmware's own doubled-slash bug is a lesson worth reusing. */
 function baseUrl( value, fallback ) {
 	return trimmedString( value, fallback ).replace( /\/+$/, '' );
@@ -171,8 +182,10 @@ function baseUrl( value, fallback ) {
  *   activeStartMinutes: number,
  *   activeEndMinutes: number,
  *   refreshActiveSeconds: number,
+ *   wakeLeadSeconds: number,
  *   obaBaseUrl: string,
  *   tarpitMs: number,
+ *   calibrationScreen: boolean,
  *   directionOverrides: Record<string, string>,
  * }}
  */
@@ -187,8 +200,13 @@ export function readConfig( env ) {
 			source.REFRESH_ACTIVE_SECONDS,
 			CONFIG_DEFAULTS.refreshActiveSeconds
 		),
+		wakeLeadSeconds: nonNegativeInteger(
+			source.REFRESH_WAKE_LEAD_SECONDS,
+			CONFIG_DEFAULTS.wakeLeadSeconds
+		),
 		obaBaseUrl: baseUrl( source.OBA_BASE_URL, CONFIG_DEFAULTS.obaBaseUrl ),
 		tarpitMs: nonNegativeInteger( source.TARPIT_MS, CONFIG_DEFAULTS.tarpitMs ),
+		calibrationScreen: flag( source.CALIBRATION_SCREEN, CONFIG_DEFAULTS.calibrationScreen ),
 		directionOverrides: Object.freeze( stopLabelMap( source.DIRECTION_OVERRIDES ) ),
 	} );
 }

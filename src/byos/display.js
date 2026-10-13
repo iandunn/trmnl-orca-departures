@@ -29,10 +29,17 @@ import { readConfig } from '../config.js';
 import { buildFilename, FILENAME_TAGS, stableEpoch } from '../filename.js';
 import { loadBoard } from '../oba/index.js';
 import { buildBoardSvg } from '../render/board.js';
+import { buildCalibrationSvg } from '../render/calibration.js';
 import { buildNoticeSvg } from '../render/notice.js';
 import { buildOvernightSvg } from '../render/overnight.js';
 import { currentSchedule, SCHEDULE_MODES } from '../schedule.js';
-import { badRequestScreen, overnightScreen, renderFailedScreen, upstreamFailedScreen } from './screens.js';
+import {
+	badRequestScreen,
+	calibrationScreen,
+	overnightScreen,
+	renderFailedScreen,
+	upstreamFailedScreen,
+} from './screens.js';
 
 /** JSON, and never a bare object — `status` has to be in the body of every single response. */
 function displayResponse( body ) {
@@ -118,11 +125,15 @@ function screenSvg( screen ) {
 		return buildOvernightSvg( screen.overnight );
 	}
 
+	if ( screen.calibration ) {
+		return buildCalibrationSvg();
+	}
+
 	return buildNoticeSvg( screen.notice );
 }
 
 /**
- * Which of the three screens this request gets.
+ * Which screen this request gets.
  *
  * The order is the design, not an accident:
  *
@@ -130,14 +141,21 @@ function screenSvg( screen ) {
  *    exists for is a base URL mistyped at the captive portal, and pairing happens whenever the owner
  *    is standing there — including at 10pm. A moon in place of the diagnostic would turn a two-second
  *    fix into a mystery until morning.
- * 2. **Outside the active window, we do not call OneBusAway at all.** The rest screen is built from
+ * 2. **`CALIBRATION_SCREEN` replaces everything else** with the edge test pattern. A device already
+ *    asleep for the night only sees it at the morning wake, because the sleep was set by the response
+ *    before the flag changed.
+ * 3. **Outside the active window, we do not call OneBusAway at all.** The rest screen is built from
  *    config, so there is no upstream request to fail, which is what makes it impossible for an outage
  *    at 9:30 pm to pin an error screen to the glass all night.
- * 3. Otherwise, departures.
+ * 4. Otherwise, departures.
  */
 async function chooseScreen( target, env, config, nowMs, allowStale ) {
 	if ( ! target.parsed ) {
 		return badRequestScreen( { nowMs, timezone: config.timezone, reason: target.reason } );
+	}
+
+	if ( config.calibrationScreen ) {
+		return calibrationScreen();
 	}
 
 	if ( currentSchedule( { nowMs, config } ).mode === SCHEDULE_MODES.overnight ) {

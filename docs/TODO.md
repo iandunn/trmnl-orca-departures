@@ -16,8 +16,6 @@ Where the sign is *wrong* rather than degraded, which is worse.
 
 - [ ] **Handle "running late" / "ahead of schedule"** when OBA reports it.
 
-- [ ] **Settle what `Wake-Time` means — `/stats` labels it with a unit that may be wrong.** `deviceBox()` in `render.js` prints `${wakeTime} ms` under "Awake last cycle", but the fixture value `1785564693` is an epoch, not a duration. It is stored verbatim in `device-telemetry.js` so no guess is baked into the data, but the page still commits to a reading. Confirm against the first real poll, then fix the label or the parse.
-
 - [ ] **Pin every `/stats` filter against the `OUTCOMES` value it is meant to match.** The enrollment alarm was dead from the day it was written — `query.js` compared `'setup'` against a recorded `'byos-setup'`. Fixed 2026-08-02, but nothing would have caught it, and a filter matching nothing looks exactly like a thing that never happened.
 
 ### Quick wins
@@ -46,6 +44,10 @@ Run this block before first contact with the device.
 
 Nothing in the server work is blocked on the hardware. Everything here is. Getting it onto a wall is a separate question — see [mounting-ideas.md](mounting-ideas.md).
 
+- [ ] **Find the cause of the ~5-minute stalls.** The device logs `connection refused(-1)` after 5 attempts with WiFi connected; signal and DNS filtering are ruled out. What was found and what is still suspected is in `docs/deploying.md`, under "When the sign stops updating".
+
+- [ ] **Turn the router's DNS rules back on once the connection failures are fixed.** They were disabled on 2026-10-12 so the sign could use any resolver while diagnosing `connection refused(-1)` from `http_retry_request.cpp`, which stalled the panel for ~5 minutes at a time.
+
 - [ ] **Clear `/stats` once the device is confirmed working — not before pointing it at the Worker.** Everything recorded so far is development traffic, and it permanently skews the panels that matter most on day one, because device identity is built to make a *single* deviation legible.
 
 	**The timing is the point, and it is the opposite of the obvious one.** Clearing first still leaves every row that pairing itself produces: the mistyped URL, the re-pairs, the enrollment calls, the hand-made `curl` that proves an endpoint answers. That is exactly the traffic the identity alarms are built to notice, so a dataset that starts the moment the sign first works is clean in a way one that starts the moment before pairing never is. Wait for a board on the glass, then rename.
@@ -54,7 +56,7 @@ Nothing in the server work is blocked on the hardware. Everything here is. Getti
 
 	**The procedure is in [`manual-testing.md`](manual-testing.md#clearing-the-stats-data)** — Analytics Engine has no delete, so it means renaming all three datasets and redeploying. Follow it there rather than duplicating it here; it has the traps, and a half-done rename is worse than not doing it.
 
-- [ ] **The BYOS contract has only ever been verified against firmware source.** Every silent-failure trap in `CLAUDE.md` — exact `image/png`, `status: 0`, the `filename` cache gates, the 31-character bug — is read, not observed.
+- [ ] **Parts of the BYOS contract are still only read from firmware source.** Pairing, `status: 0`, exact `image/png`, a changed `filename` triggering a download, and `refresh_rate: 60` were all observed working on the real device 2026-10-12. Not yet observed: the unchanged-`filename` no-op, the stuck-error-screen recovery, and the 31-character bug.
 
 - [ ] **Judge legibility at physical size.** 227 PPI on a 10.3" panel cannot be assessed on a monitor.
 

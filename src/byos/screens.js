@@ -53,6 +53,7 @@ function clockFields( timestampMs, timezone ) {
  * @property {import('../render/notice.js').Notice} [notice]
  * @property {import('../render/overnight.js').Overnight} [overnight] The nightly rest screen, which
  *           has its own builder because it carries an icon and no sentence.
+ * @property {boolean} [calibration] The edge test pattern from `src/render/calibration.js`.
  */
 
 /**
@@ -88,6 +89,16 @@ export function overnightScreen( { config, variant = DEFAULT_OVERNIGHT_VARIANT, 
 			rows,
 		},
 	};
+}
+
+/**
+ * The edge test pattern, in place of everything but the malformed-URL screen while `CALIBRATION_SCREEN`
+ * is set.
+ *
+ * @returns {Screen}
+ */
+export function calibrationScreen() {
+	return { tag: FILENAME_TAGS.calibration, calibration: true };
 }
 
 /**

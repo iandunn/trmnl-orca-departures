@@ -261,6 +261,13 @@ export async function buildStatsData( env, config, rangeKey ) {
 		// `GROUP BY` can give — an average battery voltage — is not what a device panel is asking for.
 		// Fifty rows is enough to cover several devices' last poll each, and the per-device snapshot is
 		// assembled in JS below.
+		//
+		// **Image, setup and log rows are excluded.** Every wake downloads the image a second after it
+		// polls, and that request carries only `ID` and `Access-Token`, so without the filter the newest
+		// row is almost always one with no battery, WiFi or firmware reading on it. Excluding rather than
+		// keeping only `byos-display` matters: a poll with a mistyped stop or a stale key is recorded as
+		// `bad-request` or `byos-bad-access-token`, still carries every header, and is exactly when the
+		// owner needs the box.
 		run( `
 			SELECT
 				timestamp,
@@ -290,6 +297,7 @@ export async function buildStatsData( env, config, rangeKey ) {
 				${ deviceDoubleColumn( 'height' ) } AS height
 			FROM ${ deviceDataset }
 			WHERE timestamp > NOW() - INTERVAL '${ days }' DAY
+				AND ${ deviceBlobColumn( 'outcome' ) } NOT IN ('${ OUTCOMES.byosImage }', '${ OUTCOMES.byosSetup }', '${ OUTCOMES.byosLog }')
 			ORDER BY timestamp DESC
 			LIMIT 50
 		` ),

@@ -78,6 +78,8 @@ export const FILENAME_TAGS = {
 	// The nightly rest screen. Not a failure — the sign has finished for the day and the buses have
 	// not — but it still needs its own tag, so the cache can never confuse it with a board.
 	overnight: 'layover',
+	// The edge test pattern, served only while `CALIBRATION_SCREEN` is set.
+	calibration: 'calibrt',
 };
 
 const TAG_PATTERN = /^[a-z0-9]{7}$/;

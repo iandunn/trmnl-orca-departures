@@ -18,7 +18,7 @@
  * correctness cliff, only a missed optimisation. KV is ruled out for the same reason it is ruled out
  * for rate limiting: its free write quota is 1000 a day against this sign's ~1440 polls. The Cache
  * API might work, but whether `caches.default` is honoured on a `workers.dev` subdomain is exactly
- * the kind of thing that fails silently here, and it is not worth a spike for a 60-second cache.
+ * the kind of thing that fails silently here, and it is not worth a spike for a 30-second cache.
  *
  * ## Failures expire faster than successes, deliberately
  *
@@ -31,8 +31,14 @@
  * poll always asks again.
  */
 
-/** Long enough to span a wake's two requests, short enough that nothing on the glass goes stale. */
-const SUCCESS_TTL_MS = 60000;
+/**
+ * Long enough to span a wake's two requests, and well short of the poll interval.
+ *
+ * Polls are aligned to the minute, so consecutive ones land about 60 seconds apart. A TTL near that
+ * races the next poll, and when it wins the board is drawn from the previous minute's fetch and its
+ * stamp trails the wall clock by a minute.
+ */
+const SUCCESS_TTL_MS = 30000;
 
 /** Spans the pair even on a slow link, and still expires before the next poll. See the note above. */
 const FAILURE_TTL_MS = 20000;

@@ -24,6 +24,7 @@ describe( 'readConfig', () => {
 			ACTIVE_START: '05:30',
 			ACTIVE_END: '23:45',
 			REFRESH_ACTIVE_SECONDS: 45,
+			REFRESH_WAKE_LEAD_SECONDS: 8,
 			OBA_BASE_URL: 'https://example.test/api/where',
 			TARPIT_MS: 4000,
 		} );
@@ -33,8 +34,10 @@ describe( 'readConfig', () => {
 			activeStartMinutes: 5 * 60 + 30,
 			activeEndMinutes: 23 * 60 + 45,
 			refreshActiveSeconds: 45,
+			wakeLeadSeconds: 8,
 			obaBaseUrl: 'https://example.test/api/where',
 			tarpitMs: 4000,
+			calibrationScreen: false,
 			directionOverrides: {},
 		} );
 	} );

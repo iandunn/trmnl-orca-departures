@@ -207,3 +207,13 @@ Two stops fail independently, so half a board failing is the ordinary shape of a
 - **An empty group keeps its full share of the panel.** `reserved` on the group, honoured by `rowMetrics()`. Without it the surviving direction's rows grow to fill the gap, and a partial failure renders as a different design rather than as a missing half. The message is centred in that space, large: left-aligned at row size it was tried first and read as a caption someone forgot to finish.
 - **Row count comes from `maxRowsPerGroup()` in `render/board.js`**, which divides the panel by a legibility floor. Two stops get four each, which is the density the design was accepted at; a single-direction sign gets more, because it pays for one band instead of two and a gap. This is how row count stays derived rather than configured.
 
+
+## Fitting the panel — the edge test pattern, 2026-10-12
+
+`src/render/calibration.js` draws rows of black bars against both side edges, each row inset by its label's pixel count, and `CALIBRATION_SCREEN` serves it in place of every other screen. The first row with a visible gap reads off how many columns that side hides. A 1px gap is at the limit of what the eye resolves at 227 PPI, which is why the reading is "first clear gap", not "first suspected one".
+
+On the first X it read 2 on the left and a gap even at row 0 on the right: the image is drawn 2px left, and the right edge shows two columns no image can fill. A shift to compensate was built and deleted on 2026-10-12, for two reasons worth keeping if it is ever reconsidered:
+
+- **The image can never be wider than the panel.** Widening it so the shift could fill the right strip crash-looped the device; see the root `CLAUDE.md`.
+- **Without widening, a shift only rescues the hidden left columns**, which sit inside a 60px margin with nothing in it. If it ever comes back, do it in the SVG rather than the pixels, so the `filename` hash sees the change, and backfill the uncovered columns white — transparent reads as black to the encoder.
+

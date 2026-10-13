@@ -11,10 +11,10 @@
  *
  * ## The schedule is two states, not three
  *
- * Inside the active window the sign polls at `refreshActiveSeconds`. Outside it, the sign sleeps
- * until the window opens again — one wake, not a slower cadence. There is no third off-peak tier,
- * which is why `REFRESH_IDLE_SECONDS` no longer exists: with overnight collapsed to a single sleep,
- * nothing could consume it.
+ * Inside the active window the sign polls every `refreshActiveSeconds`, aligned to the wall clock by
+ * `alignedSleepSeconds()`. Outside it, the sign sleeps until the window opens again — one wake, not a
+ * slower cadence. There is no third off-peak tier, which is why `REFRESH_IDLE_SECONDS` no longer
+ * exists: with overnight collapsed to a single sleep, nothing could consume it.
  *
  * **Outside the window the Worker never calls OneBusAway at all.** The overnight screen is built from
  * config alone, so an upstream outage at 9:30 pm cannot pin an error screen to the glass for nine
@@ -69,6 +69,18 @@ const MIN_SLEEP_SECONDS = 1;
 
 /** How many times the DST correction may re-check before giving up and using what it has. */
 const MAX_CORRECTIONS = 3;
+
+/**
+ * How far past a boundary an active poll aims to land.
+ *
+ * The "Updated at" stamp is OneBusAway's `currentTime`, not ours, so a poll aimed exactly at :00 by
+ * our clock can be answered by a server whose clock still reads :59 and stamp the minute that just
+ * ended. A few seconds of slack covers the skew between the two clocks and the jitter in the wake.
+ */
+const LANDING_OFFSET_SECONDS = 3;
+
+/** The shortest sleep worth taking to reach a boundary. See `alignedSleepSeconds()`. */
+const MIN_ALIGNED_SLEEP_SECONDS = 5;
 
 export const SCHEDULE_MODES = Object.freeze( {
 	active: 'active',
@@ -153,6 +165,40 @@ function signedMinutesApart( minuteOfDay, targetMinutes ) {
 }
 
 /**
+ * The sleep that lands the device's next poll just after the next period boundary.
+ *
+ * A flat `refresh_rate` of 60 does not give a poll every 60 seconds: the device also spends time
+ * waking, joining WiFi, downloading and painting, which measured ~12 seconds on a real X. So a flat
+ * rate drifts through the minute and the board's stamp trails the wall clock by up to a minute and a
+ * bit. Aiming at the boundary instead keeps the stamp on the current minute, and because the target is
+ * recomputed on every poll, a slow wake or a skipped one corrects itself on the next.
+ *
+ * Boundaries are multiples of the period since the epoch, which for a 60-second period are the wall
+ * clock's minutes in every timezone. A sleep shorter than `MIN_ALIGNED_SLEEP_SECONDS` aims at the
+ * following boundary instead, so a poll arriving just before one does not wake again seconds later.
+ * The floor is kept small on purpose: a late poll, say at :25 after a slow WiFi join, still has time
+ * to reach the next minute, and a larger floor would skip that minute's board entirely.
+ *
+ * @param {number} nowMs
+ * @param {number} periodSeconds
+ * @param {number} wakeLeadSeconds How long the device is awake between our response and its next
+ *                                 request, beyond the sleep we ask for.
+ * @returns {number} Whole seconds, never below `MIN_ALIGNED_SLEEP_SECONDS`.
+ */
+export function alignedSleepSeconds( nowMs, periodSeconds, wakeLeadSeconds ) {
+	const periodMs = periodSeconds * 1000;
+	const landingMs = Math.ceil( nowMs / periodMs ) * periodMs + LANDING_OFFSET_SECONDS * 1000;
+
+	let sleepSeconds = ( landingMs - nowMs ) / 1000 - wakeLeadSeconds;
+
+	while ( sleepSeconds < MIN_ALIGNED_SLEEP_SECONDS ) {
+		sleepSeconds += periodSeconds;
+	}
+
+	return Math.max( Math.round( sleepSeconds ), MIN_SLEEP_SECONDS );
+}
+
+/**
  * @param {object} options
  * @param {number} options.nowMs
  * @param {object} options.config As returned by `readConfig()`.
@@ -164,12 +210,12 @@ function signedMinutesApart( minuteOfDay, targetMinutes ) {
  *    is what the overnight screen prints. The margin belongs to the sleep, not to the promise.
  */
 export function currentSchedule( { nowMs, config } ) {
-	const { activeStartMinutes, activeEndMinutes, refreshActiveSeconds, timezone } = config;
+	const { activeStartMinutes, activeEndMinutes, refreshActiveSeconds, wakeLeadSeconds, timezone } = config;
 
 	if ( isWithinActiveWindow( localMinutesSinceMidnight( nowMs, timezone ), activeStartMinutes, activeEndMinutes ) ) {
 		return {
 			mode: SCHEDULE_MODES.active,
-			refreshSeconds: refreshActiveSeconds,
+			refreshSeconds: alignedSleepSeconds( nowMs, refreshActiveSeconds, wakeLeadSeconds ),
 			resumeAtMs: null,
 		};
 	}
